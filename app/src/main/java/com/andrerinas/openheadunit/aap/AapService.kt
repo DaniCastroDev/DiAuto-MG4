@@ -77,6 +77,7 @@ import com.andrerinas.openheadunit.main.BackgroundNotification
 import android.annotation.SuppressLint
 import com.andrerinas.openheadunit.utils.Settings
 import com.andrerinas.openheadunit.utils.protoUint32ToLong
+import com.evsuite.hardware.saic.SaicMediaPlayer
 import java.net.ServerSocket
 
 /**
@@ -1046,12 +1047,34 @@ class AapService : Service(), UsbReceiver.Listener {
         // real connection is beginning.
         requestPermanentAudioFocus()
 
+        maybeSwitchCarToBtMusic()
+
         // Start GpsLocationService and NightModeManager sensor tracking
         AppLog.i("AapService: Starting GpsLocationService and NightModeManager since connection is established")
         startService(GpsLocationService.intent(this))
         nightModeManager?.start()
 
         serviceScope.launch { commManager.startHandshake() }
+    }
+
+    /**
+     * Optional hybrid test: SAIC launcher path (`requestBtAudioFocus` then `play`) so the car
+     * amp is on Bluetooth Music while AA video stays on Wi‑Fi. Requires hybrid
+     * ([Settings.musicViaBluetooth]) and [Settings.forceBtMusicOnConnect].
+     */
+    private fun maybeSwitchCarToBtMusic() {
+        if (!settings.musicViaBluetooth || !settings.forceBtMusicOnConnect) return
+        serviceScope.launch(Dispatchers.IO) {
+            SaicMediaPlayer.connectBluetooth(this@AapService)
+            repeat(12) { attempt ->
+                if (SaicMediaPlayer.switchToBluetooth()) {
+                    AppLog.i("AapService: car media source switched to BT Music (attempt ${attempt + 1})")
+                    return@launch
+                }
+                delay(250)
+            }
+            AppLog.w("AapService: could not switch car to BT Music (SAIC BT music service not ready)")
+        }
     }
 
     private fun launchAapProjectionActivity() {

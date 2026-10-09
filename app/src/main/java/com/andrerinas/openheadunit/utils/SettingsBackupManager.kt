@@ -102,6 +102,7 @@ object SettingsBackupManager {
         "auto-connect-single-usb" to ValueType.BOOLEAN,
         "enable-audio-sink" to ValueType.BOOLEAN,
         "music-via-bluetooth-v2" to ValueType.BOOLEAN,
+        "force-bt-music-on-connect" to ValueType.BOOLEAN,
         "media-audio-buffer-ms" to ValueType.INT,
         "static-audio-focus" to ValueType.BOOLEAN,
         // Enum-backed, but INT is safe: Settings.playbackFocusMode reads it through
@@ -190,6 +191,7 @@ object SettingsBackupManager {
         "enable-rotary",
         "enable-audio-sink",
         "music-via-bluetooth-v2",
+        "force-bt-music-on-connect",
         "media-audio-buffer-ms",
         "static-audio-focus",
         "playback-focus-mode",
