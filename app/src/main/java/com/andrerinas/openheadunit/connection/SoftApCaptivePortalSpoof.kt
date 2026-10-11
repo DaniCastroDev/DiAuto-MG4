@@ -139,13 +139,14 @@ class SoftApCaptivePortalSpoof {
         while (running.get()) {
             var client: Socket? = null
             try {
-                client = try {
+                val socket = try {
                     server.accept()
                 } catch (_: SocketTimeoutException) {
                     continue
-                }
-                client.soTimeout = 2_000
-                val reader = BufferedReader(InputStreamReader(client.getInputStream()))
+                } ?: continue
+                client = socket
+                socket.soTimeout = 2_000
+                val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
                 val requestLine = reader.readLine() ?: ""
                 // Drain headers so clients finish the request.
                 while (true) {
@@ -158,8 +159,8 @@ class SoftApCaptivePortalSpoof {
                 } else {
                     "HTTP/1.0 204 No Content\r\nConnection: close\r\n\r\n"
                 }
-                client.getOutputStream().write(body.toByteArray(Charsets.US_ASCII))
-                client.getOutputStream().flush()
+                socket.getOutputStream().write(body.toByteArray(Charsets.US_ASCII))
+                socket.getOutputStream().flush()
             } catch (_: Exception) {
                 // ignore per-connection errors
             } finally {
