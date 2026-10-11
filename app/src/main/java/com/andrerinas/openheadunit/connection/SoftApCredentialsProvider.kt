@@ -77,6 +77,9 @@ class SoftApCredentialsProvider(
     private var onCredentialsReady: ((ssid: String, psk: String, ip: String, bssid: String) -> Unit)? = null
     private var onInvalidated: (() -> Unit)? = null
 
+    /** Answers phone connectivity checks so SoftAP is not abandoned for "no internet". */
+    private val captivePortalSpoof = SoftApCaptivePortalSpoof()
+
     private var resolveJob: Job? = null
     /** Fences blocking interface/MAC reads from a resolver superseded by refresh or stop. */
     private var resolveGeneration = 0L
@@ -197,6 +200,7 @@ class SoftApCredentialsProvider(
         triedAutoEnable = false
         reportedConfigUnreadable = false
         reportedBudgetExhausted = false
+        captivePortalSpoof.stop()
         if (isReceiverRegistered) {
             // Reset even if unregister throws: a flag set in only one direction is how a
             // long-lived manager ends up unable to re-arm.
@@ -231,6 +235,7 @@ class SoftApCredentialsProvider(
         resolveJob?.cancel()
         // Re-resolving is also invalidation: retrying must wait for the new AP, rather than
         // sending the cached eth0 details again while this job looks for ap0.
+        captivePortalSpoof.stop()
         onInvalidated?.invoke()
         reportedNoInterface = false
         resolveJob = scope.launch(Dispatchers.IO + CoroutineName("SoftApCredentials-Resolve")) {
@@ -289,7 +294,10 @@ class SoftApCredentialsProvider(
 
     @Synchronized
     private fun invalidateIfCurrent(generation: Long) {
-        if (isRunning && generation == resolveGeneration) onInvalidated?.invoke()
+        if (isRunning && generation == resolveGeneration) {
+            captivePortalSpoof.stop()
+            onInvalidated?.invoke()
+        }
     }
 
     /**
@@ -491,6 +499,8 @@ class SoftApCredentialsProvider(
                 SoftApCredentialsAttempt.NO_AP_YET
             } else {
                 AppLog.i("SoftApCredentials: SUCCESS - Providing credentials from ${iface.name}: SSID=$ssid, IP=$ip, BSSID=${bssid.ifEmpty { "<none>" }}")
+                // SoftAP has no upstream; spoof captive checks so phones do not drop the join.
+                captivePortalSpoof.start(iface.name, ip)
                 onCredentialsReady?.invoke(ssid, psk, ip, bssid)
                 SoftApCredentialsAttempt.PUBLISHED
             }
