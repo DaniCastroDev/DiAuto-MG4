@@ -40,12 +40,8 @@ class EvHardwareEnergySignalSource(context: Context) : EnergySignalSource {
     }
 
     override fun firmware() = FirmwareInfo.getGeneration()
-    override fun socPercent() =
-        SaicCharging.stateOfChargePercent() ?: EVHardware.getVendorBatterySocPercent()
-    override fun rangeKm() =
-        SaicCharging.rangeKm()?.toFloat()
-            ?: EVHardware.getStandardRangeKm()
-            ?: EVHardware.getVendorRangeKm()?.toFloat()
+    override fun socPercent() = EVHardware.getBatterySocPercent()
+    override fun rangeKm() = EVHardware.getRemainingRangeKm()?.toFloat()
     override fun speedKmh() = EVHardware.getVehicleSpeedKmh()
     // The standard property first, the vendor pack pair second: SWI68 answers no
     // EV_INSTANTANEOUS_CHARGE_RATE but does publish the voltage and the current it is made of.

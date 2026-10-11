@@ -6,21 +6,24 @@ import com.andrerinas.openheadunit.App
 import com.andrerinas.openheadunit.utils.AppLog
 import com.andrerinas.openheadunit.utils.Settings
 import com.evsuite.hardware.EVHardware
+import com.evsuite.hardware.FirmwareInfo
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 /**
- * Read-only MG4 SWI69 bridge for Android Auto VehicleEnergyModel.
- * SoC/range from EVHardware (or demo settings); pack Wh from user net capacity × SOH.
+ * Read-only MG4 bridge for Android Auto VehicleEnergyModel.
+ *
+ * SoC/range come only from [EVHardware.getBatterySocPercent] /
+ * [EVHardware.getRemainingRangeKm] (Saic + CPM in one place). Pack Wh from user net × SOH.
  */
 object Mg4EnergyProvider {
     private const val TAG = "DiAuto-MG4"
     private const val POLL_MS = 5_000L
     private const val STALE_MS = 3 * 60_000L
-    /** SAIC/VHAL bridges often need a few hundred ms after init before SoC is readable. */
-    private const val INITIAL_READ_TIMEOUT_MS = 8_000L
+    /** Cover SAIC CarService / CPM bind ladder (retries out to 60s). */
+    private const val INITIAL_READ_TIMEOUT_MS = 60_000L
     private const val INITIAL_RETRY_MS = 500L
 
     data class EnergySnapshot(
@@ -75,8 +78,15 @@ object Mg4EnergyProvider {
                 try {
                     EVHardware.init(context.applicationContext)
                     initialized = true
-                    // First Service Discovery / VEM request often races a still-empty bridge.
-                    // Retry quickly so Maps sees SoC without needing a reconnect.
+                    AppLog.i(
+                        "$TAG energy start firmware=${FirmwareInfo.getDetectedString()} " +
+                            "gen=${FirmwareInfo.getGeneration()} " +
+                            "cpm=${EVHardware.isCarPropertyManagerReady()}",
+                    )
+                    EVHardware.whenCarPropertyManagerReady {
+                        AppLog.i("$TAG CarPropertyManager ready — refreshing SoC/range")
+                        refresh()
+                    }
                     primeFirstReading()
                 } catch (error: Throwable) {
                     AppLog.e("$TAG EVHardware init failed; EV energy disabled: ${error.message}")
@@ -120,9 +130,10 @@ object Mg4EnergyProvider {
                 EVHardware.init(context.applicationContext)
                 initialized = true
             }
-            val percent = EVHardware.getVendorBatterySocPercent()?.toDouble() ?: return null
-            val rangeKm = (EVHardware.getVendorRangeKm()
-                ?: EVHardware.getStandardRangeKm()?.roundToInt()) ?: return null
+            val percent = EVHardware.getBatterySocPercent()?.toDouble() ?: return null
+            val rangeKm = EVHardware.getRemainingRangeKm()
+                ?: latest?.rangeKm?.takeIf { it > 0 }
+                ?: return null
             if (rangeKm <= 0) return null
             val capacityKwh = (netCapacityKwh * sohPercent / 100f).toDouble().coerceIn(1.0, 200.0)
             val fraction = (percent / 100.0).coerceIn(0.01, 1.0)
@@ -157,7 +168,10 @@ object Mg4EnergyProvider {
                 return
             }
         } while (SystemClock.elapsedRealtime() < deadline)
-        AppLog.i("$TAG first SoC/range still pending after ${INITIAL_READ_TIMEOUT_MS}ms; periodic poll continues")
+        AppLog.i(
+            "$TAG first SoC/range still pending after ${INITIAL_READ_TIMEOUT_MS}ms; " +
+                "cpm=${EVHardware.isCarPropertyManagerReady()}; periodic poll continues",
+        )
     }
 
     private fun pollSafely() {
@@ -177,10 +191,11 @@ object Mg4EnergyProvider {
 
         if (!initialized) return
 
-        val percent = EVHardware.getVendorBatterySocPercent()?.toDouble() ?: return
-        val rangeKm = (EVHardware.getVendorRangeKm()
-            ?: EVHardware.getStandardRangeKm()?.roundToInt()) ?: return
-        if (rangeKm <= 0) return
+        val percent = EVHardware.getBatterySocPercent()?.toDouble() ?: return
+        // Prefer live range; keep last good range so a late range does not block SoC.
+        val rangeKm = EVHardware.getRemainingRangeKm()?.takeIf { it > 0 }
+            ?: latest?.rangeKm?.takeIf { it > 0 }
+            ?: return
 
         publishFromPercent(settings, percent, rangeKm, demo = false)
     }

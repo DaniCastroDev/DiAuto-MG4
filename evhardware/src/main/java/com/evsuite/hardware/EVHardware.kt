@@ -15,9 +15,12 @@ import com.evsuite.hardware.AppLogger
 import com.evsuite.hardware.model.DriveMode
 import com.evsuite.hardware.model.RegenLevel
 import com.evsuite.hardware.FirmwareInfo
+import com.evsuite.hardware.saic.SaicCharging
+import com.evsuite.hardware.saic.SaicHub
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Hardware abstraction layer for MG4 vehicle control.
@@ -272,6 +275,9 @@ object EVHardware {
     /** Listeners notified as soon as Katman4 (mIVehiclePropertyService) is operational. */
     private val katman4ReadyListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
 
+    /** CPM-only readiness — energy SoC does not need HVAC. */
+    private val cpmReadyListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+
     /**
      * Runs [action] as soon as CarPropertyManager et CarHvacManager are available.
      * If already ready, runs immediately. Otherwise queued and triggered on connection.
@@ -281,6 +287,18 @@ object EVHardware {
             action()
         } else {
             katman1ReadyListeners.add(action)
+        }
+    }
+
+    /**
+     * Runs [action] when [CarPropertyManager] alone is ready (no HVAC wait).
+     * Used by Maps energy polling so SoC is not blocked behind climate bind delays.
+     */
+    fun whenCarPropertyManagerReady(action: () -> Unit) {
+        if (sCarPropertyManager != null) {
+            action()
+        } else {
+            cpmReadyListeners.add(action)
         }
     }
 
@@ -551,13 +569,41 @@ object EVHardware {
         Wheel.REAR_RIGHT -> PROP_VENDOR_TIRE_RR
     }
 
-    /** Vendor battery SOC; SWI68 and SWI69 both publish it on the same id. */
+    /**
+     * Vendor CPM SOC only (`0x2160F404`). Prefer [getBatterySocPercent] from app code —
+     * that is the single entry that also tries the Saic charging binder.
+     *
+     * Not gated on [FirmwareInfo.getGeneration]: DBI* is normalized to SWI* there, and
+     * SWI131 used to hard-null here even when the property was published.
+     */
     fun getVendorBatterySocPercent(): Float? =
-        if (FirmwareInfo.getGeneration() == FirmwareInfo.Gen.SWI68 ||
-            FirmwareInfo.getGeneration() == FirmwareInfo.Gen.SWI69) {
-            getFloatPropertyCPM(PROP_EV_BATTERY_PCT_SWI68, AREA_GLOBAL)
-                ?.takeIf { it.isFinite() && it in 0f..100f }
-        } else null
+        getFloatPropertyCPM(PROP_EV_BATTERY_PCT_SWI68, AREA_GLOBAL)
+            ?.takeIf { it.isFinite() && it in 0f..100f }
+
+    /**
+     * **Single SoC read for Maps + charging UI + telemetry.**
+     * Saic `vehiclecharging` first (stock charging screen path), then vendor CPM.
+     */
+    fun getBatterySocPercent(): Float? {
+        ensureSaicHubConnected()
+        return SaicCharging.stateOfChargePercent()?.takeIf { it.isFinite() && it in 0f..100f }
+            ?: getVendorBatterySocPercent()
+    }
+
+    /**
+     * **Single remaining-range read (km).** Saic endurance, then vendor CPM, then AAOS range.
+     */
+    fun getRemainingRangeKm(): Int? {
+        ensureSaicHubConnected()
+        return SaicCharging.rangeKm()?.takeIf { it > 0 }
+            ?: getVendorRangeKm()?.takeIf { it > 0 }
+            ?: getStandardRangeKm()?.roundToInt()?.takeIf { it > 0 }
+    }
+
+    private fun ensureSaicHubConnected() {
+        val ctx = sAppContext ?: return
+        runCatching { SaicHub.connect(ctx) }
+    }
 
     /**
      * Battery power from the pack's own voltage and current, in kW — SWI68 only.
@@ -584,12 +630,12 @@ object EVHardware {
         return volts * amps / 1_000f
     }
 
-    /** Vendor range fallback; SWI68 and SWI69 both publish it on the same id. */
+    /**
+     * Vendor range fallback (`0x2140F41C`). Same id family as [getVendorBatterySocPercent];
+     * not generation-gated — see that method.
+     */
     fun getVendorRangeKm(): Int? =
-        if (FirmwareInfo.getGeneration() == FirmwareInfo.Gen.SWI68 ||
-            FirmwareInfo.getGeneration() == FirmwareInfo.Gen.SWI69) {
-            getIntPropertyCPM(PROP_EV_RANGE_KM_SWI68, AREA_GLOBAL).takeIf { it >= 0 }
-        } else null
+        getIntPropertyCPM(PROP_EV_RANGE_KM_SWI68, AREA_GLOBAL).takeIf { it >= 0 }
 
     /** One property, its id, and exactly what the vehicle answered for it. */
     data class PropertyReport(val name: String, val propId: Int, val areaId: Int, val outcome: String) {
@@ -749,6 +795,9 @@ object EVHardware {
         GlassEvidence.load(context)
         com.evsuite.hardware.saic.RadioBandMemory.load(context)
         AppLogger.i(TAG, "=== EVHardware.init() === uid=${android.os.Process.myUid()} sdk=${android.os.Build.VERSION.SDK_INT} device=${android.os.Build.DEVICE}")
+        // Energy SoC/range share this hub with the stock charging UI — bind once here.
+        runCatching { SaicHub.connect(context.applicationContext) }
+            .onFailure { AppLogger.w(TAG, "SaicHub.connect: ${it.message}") }
         bindCarService(context)
         sVehicleBinder = getBinderService("vehiclesetting")
         when {
@@ -926,11 +975,13 @@ object EVHardware {
 
             val getCarManager = carClass.getMethod("getCarManager", String::class.java)
 
+            var cpmJustBecameReady = false
             if (sCarPropertyManager == null) {
                 try {
                     val svc = carClass.getField("PROPERTY_SERVICE").get(null) as String
                     sCarPropertyManager = getCarManager.invoke(car, svc)
                     cacheCarPropertyMethods(sCarPropertyManager)
+                    cpmJustBecameReady = sCarPropertyManager != null
                     AppLogger.i(TAG, "  Katman1: CarPropertyManager READY ✓")
                 } catch (e: Exception) {
                     AppLogger.w(TAG, "  Katman1: CarPropertyManager unavailable: ${e.message}")
@@ -945,6 +996,12 @@ object EVHardware {
                 } catch (e: Exception) {
                     AppLogger.w(TAG, "  Katman1: CarHvacManager unavailable: ${e.message}")
                 }
+            }
+
+            if (cpmJustBecameReady && cpmReadyListeners.isNotEmpty()) {
+                val toNotify = cpmReadyListeners.toList()
+                cpmReadyListeners.clear()
+                Handler(Looper.getMainLooper()).post { toNotify.forEach { it() } }
             }
 
             // Notify whenKatman1Ready subscribers as soon as both managers are ready
