@@ -80,7 +80,7 @@ class SettingsFragment : Fragment() {
     // Wireless items here only appear in Basic when the user connects wirelessly (see filterSettings).
     private val basicSettingIds = setOf(
         "staticBSSID", "appLanguage", "autoStartSettings", "autoConnectSettings", "resolution",
-        "dpiPixelDensity", "viewMode", "fpsLimit", "musicViaBluetooth",
+        "dpiPixelDensity", "viewMode", "fpsLimit", "musicViaBluetooth", "forceBtMusicOnConnect",
         "enableAudioSink", "mediaAudioBuffer", "micSettings", "audioVolumeOffsets",
         "keymap", "version", "about", "otaBeta", "otaStatus", "otaCheck",
     )
@@ -102,6 +102,7 @@ class SettingsFragment : Fragment() {
     private var pendingFpsLimit: Int? = null
     private var pendingBluetoothAddress: String? = null
     private var pendingMusicViaBluetooth: Boolean = false
+    private var pendingForceBtMusicOnConnect: Boolean = false
     private var pendingEnableAudioSink: Boolean? = null
     private var pendingStaticAudioFocus: Boolean? = null
     private var pendingPlaybackFocusMode: PlaybackFocusPolicy.Mode? = null
@@ -229,6 +230,7 @@ class SettingsFragment : Fragment() {
         pendingFpsLimit = settings.fpsLimit
         pendingBluetoothAddress = settings.bluetoothAddress
         pendingMusicViaBluetooth = settings.musicViaBluetooth
+        pendingForceBtMusicOnConnect = settings.forceBtMusicOnConnect
         pendingEnableAudioSink = settings.enableAudioSink
         pendingStaticAudioFocus = settings.staticAudioFocus
         pendingPlaybackFocusMode = settings.playbackFocusMode
@@ -368,6 +370,7 @@ class SettingsFragment : Fragment() {
         pendingFpsLimit = settings.fpsLimit
         pendingBluetoothAddress = settings.bluetoothAddress
         pendingMusicViaBluetooth = settings.musicViaBluetooth
+        pendingForceBtMusicOnConnect = settings.forceBtMusicOnConnect
         pendingEnableAudioSink = settings.enableAudioSink
         pendingStaticAudioFocus = settings.staticAudioFocus
         pendingPlaybackFocusMode = settings.playbackFocusMode
@@ -493,6 +496,7 @@ class SettingsFragment : Fragment() {
         pendingFpsLimit?.let { settings.fpsLimit = it }
         pendingBluetoothAddress?.let { settings.bluetoothAddress = it }
         settings.musicViaBluetooth = pendingMusicViaBluetooth
+        settings.forceBtMusicOnConnect = pendingForceBtMusicOnConnect
         pendingEnableAudioSink?.let { settings.enableAudioSink = it }
         pendingStaticAudioFocus?.let { settings.staticAudioFocus = it }
         pendingPlaybackFocusMode?.let { settings.playbackFocusMode = it }
@@ -616,6 +620,7 @@ class SettingsFragment : Fragment() {
                         pendingFpsLimit != settings.fpsLimit ||
                         pendingBluetoothAddress != settings.bluetoothAddress ||
                         pendingMusicViaBluetooth != settings.musicViaBluetooth ||
+                        pendingForceBtMusicOnConnect != settings.forceBtMusicOnConnect ||
                         pendingEnableAudioSink != settings.enableAudioSink ||
                         pendingStaticAudioFocus != settings.staticAudioFocus ||
                         pendingPlaybackFocusMode != settings.playbackFocusMode ||
@@ -1641,6 +1646,17 @@ class SettingsFragment : Fragment() {
             items.add(SettingItem.InfoBanner(
                 stableId = "hybridBtCallsHint",
                 textResId = R.string.da_hybrid_bt_calls_hint,
+            ))
+            items.add(SettingItem.ToggleSettingEntry(
+                stableId = "forceBtMusicOnConnect",
+                nameResId = R.string.da_force_bt_music_on_connect,
+                descriptionResId = R.string.da_force_bt_music_on_connect_hint,
+                isChecked = pendingForceBtMusicOnConnect,
+                onCheckedChanged = { enabled ->
+                    pendingForceBtMusicOnConnect = enabled
+                    checkChanges()
+                    updateSettingsList()
+                },
             ))
         } else if (pendingEnableAudioSink == true) {
             items.add(SettingItem.InfoBanner(

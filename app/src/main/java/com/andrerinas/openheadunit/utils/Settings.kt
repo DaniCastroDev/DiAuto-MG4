@@ -692,6 +692,15 @@ class Settings(private val context: Context) {
         get() = prefs.getBoolean(KEY_MUSIC_VIA_BLUETOOTH, true)
         set(value) { prefs.edit().putBoolean(KEY_MUSIC_VIA_BLUETOOTH, value).apply() }
 
+    /**
+     * When hybrid ([musicViaBluetooth]) is on and AA connects, ask SAIC media to select
+     * Bluetooth Music (`requestBtAudioFocus` then `play`) — same as the home music card.
+     * Default off; test toggle for MG4 / SAIC.
+     */
+    var forceBtMusicOnConnect: Boolean
+        get() = prefs.getBoolean(KEY_FORCE_BT_MUSIC_ON_CONNECT, false)
+        set(value) { prefs.edit().putBoolean(KEY_FORCE_BT_MUSIC_ON_CONNECT, value).apply() }
+
     fun effectivePlaybackFocusMode(context: Context): PlaybackFocusPolicy.Mode =
         if (musicViaBluetooth) PlaybackFocusPolicy.Mode.NEVER else playbackFocusMode
 
@@ -1131,6 +1140,7 @@ class Settings(private val context: Context) {
         const val KEY_LOG_LOCATION = "log-location"
         // Was "music-via-bluetooth" (default only DiLink5.1). Renamed so upgrades start ON.
         const val KEY_MUSIC_VIA_BLUETOOTH = "music-via-bluetooth-v2"
+        const val KEY_FORCE_BT_MUSIC_ON_CONNECT = "force-bt-music-on-connect"
         const val KEY_MEDIA_AUDIO_BUFFER_MS = "media-audio-buffer-ms"
         /** Bumped key so upgrades pick AAC default on for Wi‑Fi audio trials. */
         const val KEY_USE_AAC_AUDIO = "use-aac-audio-v2"

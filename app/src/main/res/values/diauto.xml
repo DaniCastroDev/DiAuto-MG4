@@ -44,4 +44,6 @@
     <string name="da_hybrid_bt_music_needed">Connect the phone to the car Bluetooth for music and calls (hybrid mode). Otherwise they may stay on the phone.</string>
     <string name="da_hybrid_bt_calls_hint">Hybrid needs car Bluetooth (A2DP + phone/HFP). If Bluetooth is off, music, calls and Gemini can stay on the phone while Android Auto video still works. Assistant/nav audio still use Android Auto (not Wi‑Fi music).</string>
     <string name="da_wifi_music_trial_hint">Trying music over Wi‑Fi: turn on AAC audio, raise the Wi‑Fi media buffer (1000–1500 ms), and keep a moderate frame rate. If it still stutters, switch back to Music through car Bluetooth.</string>
+    <string name="da_force_bt_music_on_connect">Switch car to BT Music on connect</string>
+    <string name="da_force_bt_music_on_connect_hint">Test: when Android Auto connects (hybrid on), ask the car media service to select Bluetooth Music — same as the home-screen music card. SAIC / MG. Off by default.</string>
 </resources>
