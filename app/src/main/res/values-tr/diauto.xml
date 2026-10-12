@@ -34,5 +34,8 @@
     <string name="da_saved_hint">Görüntü ayarı değişiklikleri bir sonraki bağlantıda uygulanır.</string>
     <string name="da_settings_subtitle">Ekran, ses ve bağlantıyı ayarla.</string>
     <string name="da_bluetooth_music">Müzik araç Bluetooth’undan</string>
-    <string name="da_bluetooth_music_hint">Müziği aracın Bluetooth oynatıcısında tut. DiAuto ses odağına dokunmaz; navigasyon ve asistan sesi kullanılabilir kalır. Değişiklikten sonra Android Auto’yu yeniden bağla.</string>
+    <string name="da_bluetooth_music_hint">Hibrit: görüntü Wi‑Fi, müzik araç Bluetooth’undan (Wi‑Fi ses kasmasını önler). Telefon araç Bluetooth’una bağlı kalsın. DiAuto A2DP/HFP’yi yeniden bağlamaya ve kaynağı Bluetooth’a çekmeye çalışır. Navigasyon ve asistan Android Auto’da kalır. Değişiklikten sonra Android Auto’yu yeniden bağla.</string>
+    <string name="da_hybrid_bt_music_needed">Müzik ve aramalar için telefonu araç Bluetooth’una bağla (hibrit mod). Yoksa telefonda kalabilir.</string>
+    <string name="da_hybrid_bt_calls_hint">Hibrit mod araç Bluetooth’u ister (A2DP + telefon/HFP). Bluetooth kapalıysa müzik, arama ve Gemini telefonda kalabilir; Android Auto görüntüsü yine çalışır. Asistan/nav sesi Android Auto üzerinden gelir (Wi‑Fi müzik değil).</string>
+    <string name="da_wifi_music_trial_hint">Müziği Wi‑Fi’den deniyorsan: AAC sesi aç, Wi‑Fi medya tamponunu yükselt (1000–1500 ms), fps’i abartma. Hâlâ kasıyorsa “Müzik araç Bluetooth’undan”a dön.</string>
 </resources>

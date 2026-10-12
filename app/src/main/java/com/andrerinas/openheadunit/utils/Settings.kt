@@ -685,15 +685,15 @@ class Settings(private val context: Context) {
         set(value) { prefs.edit().putBoolean("enable-audio-sink", value).apply() }
 
     /**
-     * Keep media on the car Bluetooth/A2DP player; DiAuto does not advertise the AA MEDIA sink.
-     * Key renamed so upgrades drop the old DiLink5.1-only default and start ON (Wi‑Fi video + BT music).
+     * Hybrid: AA video over Wi‑Fi, music on car Bluetooth/A2DP (MEDIA sink omitted — Wi‑Fi
+     * media PCM stutters on MG4). Key renamed so upgrades drop the old DiLink5.1-only default.
      */
     var musicViaBluetooth: Boolean
         get() = prefs.getBoolean(KEY_MUSIC_VIA_BLUETOOTH, true)
         set(value) { prefs.edit().putBoolean(KEY_MUSIC_VIA_BLUETOOTH, value).apply() }
 
-    val effectivePlaybackFocusMode: PlaybackFocusPolicy.Mode
-        get() = if (musicViaBluetooth) PlaybackFocusPolicy.Mode.NEVER else playbackFocusMode
+    fun effectivePlaybackFocusMode(context: Context): PlaybackFocusPolicy.Mode =
+        if (musicViaBluetooth) PlaybackFocusPolicy.Mode.NEVER else playbackFocusMode
 
     @Suppress("DEPRECATION")
     val displayRefreshRate: Float
@@ -724,8 +724,9 @@ class Settings(private val context: Context) {
         )
         set(value) { prefs.edit().putInt("media-key-routing", value.value).apply() }
 
+    /** Voice / nav / media on separate Android streams — helps calls not share MUSIC with radio. */
     var separateAudioStreams: Boolean
-        get() = prefs.getBoolean("separate-audio-streams", false)
+        get() = prefs.getBoolean("separate-audio-streams", true)
         set(value) { prefs.edit().putBoolean("separate-audio-streams", value).apply() }
 
     var micInputSource: Int
@@ -766,9 +767,13 @@ class Settings(private val context: Context) {
         get() = prefs.getInt("audio-queue-capacity", 50)
         set(value) { prefs.edit().putInt("audio-queue-capacity", value).apply() }
 
+    /**
+     * AAC-LC for AA audio sinks. Less Wi‑Fi bandwidth than PCM — preferred when trying music
+     * over Wi‑Fi (hybrid off). Phone must accept the codec; turn off if audio fails to start.
+     */
     var useAacAudio: Boolean
-        get() = prefs.getBoolean("use-aac-audio", false)
-        set(value) { prefs.edit().putBoolean("use-aac-audio", value).apply() }
+        get() = prefs.getBoolean(KEY_USE_AAC_AUDIO, true)
+        set(value) { prefs.edit().putBoolean(KEY_USE_AAC_AUDIO, value).apply() }
 
     var micEchoCanceler: Boolean
         get() = prefs.getBoolean("mic-echo-canceler", false)
@@ -1127,6 +1132,8 @@ class Settings(private val context: Context) {
         // Was "music-via-bluetooth" (default only DiLink5.1). Renamed so upgrades start ON.
         const val KEY_MUSIC_VIA_BLUETOOTH = "music-via-bluetooth-v2"
         const val KEY_MEDIA_AUDIO_BUFFER_MS = "media-audio-buffer-ms"
+        /** Bumped key so upgrades pick AAC default on for Wi‑Fi audio trials. */
+        const val KEY_USE_AAC_AUDIO = "use-aac-audio-v2"
         // Was view-mode / dpi-pixel-density / fps-limit. Renamed so upgrades pick AllGo MG4 defaults
         // (SurfaceView, Auto DPI→227@1080p, 30 fps) instead of keeping TextureView/60 fps.
         const val KEY_VIEW_MODE = "view-mode-allgo"

@@ -7,6 +7,7 @@ import com.andrerinas.openheadunit.App
 import com.andrerinas.openheadunit.R
 import com.andrerinas.openheadunit.aap.AapMessage
 import com.andrerinas.openheadunit.aap.AapService
+import com.andrerinas.openheadunit.aap.HybridMusicPolicy
 import com.andrerinas.openheadunit.aap.KeyCode
 import com.andrerinas.openheadunit.aap.protocol.AudioConfigs
 import com.andrerinas.openheadunit.aap.protocol.Channel
@@ -15,6 +16,7 @@ import com.andrerinas.openheadunit.aap.protocol.proto.Media
 import com.andrerinas.openheadunit.aap.protocol.proto.Sensors
 import com.andrerinas.openheadunit.decoder.VideoDecoder
 import com.andrerinas.openheadunit.utils.AppLog
+import com.andrerinas.openheadunit.utils.BluetoothHelper
 import com.andrerinas.openheadunit.utils.HeadUnitScreenConfig
 import com.andrerinas.openheadunit.utils.ToastUtils
 import com.andrerinas.openheadunit.vehicle.Mg4EnergyProvider
@@ -188,13 +190,20 @@ class ServiceDiscoveryResponse(private val context: Context)
 
             services.add(input)
 
-            val audioType = if (settings.useAacAudio) Media.MediaCodecType.MEDIA_CODEC_AUDIO_AAC_LC else Media.MediaCodecType.MEDIA_CODEC_AUDIO_PCM
+            // AAC only for MEDIA (Wi‑Fi music trial). SPEECH/SYSTEM stay PCM so Gemini /
+            // assistant TTS is not refused by phones that will not decode AAC on those sinks.
+            val mediaCodec = if (settings.useAacAudio) {
+                Media.MediaCodecType.MEDIA_CODEC_AUDIO_AAC_LC
+            } else {
+                Media.MediaCodecType.MEDIA_CODEC_AUDIO_PCM
+            }
+            val speechCodec = Media.MediaCodecType.MEDIA_CODEC_AUDIO_PCM
 
             // Always add Audio2 (System Sounds) to keep connection alive
             val audio2 = Control.Service.newBuilder().also { service ->
                 service.id = Channel.ID_AU2
                 service.mediaSinkService = Control.Service.MediaSinkService.newBuilder().also {
-                    it.availableType = audioType
+                    it.availableType = speechCodec
                     it.audioType = Media.AudioStreamType.SYSTEM
                     it.addAudioConfigs(AudioConfigs.get(Channel.ID_AU2))
                 }.build()
@@ -206,7 +215,7 @@ class ServiceDiscoveryResponse(private val context: Context)
                     val audio1 = Control.Service.newBuilder().also { service ->
                         service.id = Channel.ID_AU1
                         service.mediaSinkService = Control.Service.MediaSinkService.newBuilder().also {
-                            it.availableType = audioType
+                            it.availableType = speechCodec
                             it.audioType = Media.AudioStreamType.SPEECH
                             it.addAudioConfigs(AudioConfigs.get(Channel.ID_AU1))
                         }.build()
@@ -214,11 +223,51 @@ class ServiceDiscoveryResponse(private val context: Context)
                     services.add(audio1)
                 }
 
-                if (!AapService.selfMode && !settings.musicViaBluetooth) {
+                // Hybrid: never put media PCM on Wi‑Fi AA (stutters on MG4). Music stays on
+                // car Bluetooth.
+                val omitMedia = HybridMusicPolicy.omitAaMediaSink(settings.musicViaBluetooth)
+                if (omitMedia) {
+                    val a2dpBefore = BluetoothHelper.a2dpMediaLinkState(context)
+                    AppLog.i(
+                        "[ServiceDiscovery] hybrid music: omitting AA MEDIA sink " +
+                            "(a2dpBefore=$a2dpBefore)",
+                    )
+                    // A2DP for music + HFP for call UI/audio on the car Bluetooth stack.
+                    val hfpBefore = BluetoothHelper.handsFreeLinkState(context)
+                    if (HybridMusicPolicy.needsBluetoothMediaLink(true, a2dpBefore) ||
+                        hfpBefore != true
+                    ) {
+                        val asked = BluetoothHelper.ensureCarBluetoothAudioLink(
+                            context,
+                            settings.bluetoothAddress,
+                        )
+                        AppLog.i(
+                            "[ServiceDiscovery] hybrid: ensureCarBluetoothAudioLink → asked=$asked " +
+                                "(a2dpBefore=$a2dpBefore hfpBefore=$hfpBefore)",
+                        )
+                    }
+                    val a2dpAfter = BluetoothHelper.a2dpMediaLinkState(context)
+                    val hfpAfter = BluetoothHelper.handsFreeLinkState(context)
+                    if (HybridMusicPolicy.needsBluetoothMediaLink(true, a2dpAfter) ||
+                        hfpAfter != true
+                    ) {
+                        AppLog.w(
+                            "[ServiceDiscovery] hybrid: car Bluetooth incomplete " +
+                                "(a2dp=$a2dpAfter hfp=$hfpAfter) — music/calls may stay on the phone",
+                        )
+                        ToastUtils.showToast(
+                            context,
+                            R.string.da_hybrid_bt_music_needed,
+                            android.widget.Toast.LENGTH_LONG,
+                            force = true,
+                        )
+                    }
+                }
+                if (!AapService.selfMode && !omitMedia) {
                     val audio0 = Control.Service.newBuilder().also { service ->
                         service.id = Channel.ID_AUD
                         service.mediaSinkService = Control.Service.MediaSinkService.newBuilder().also {
-                            it.availableType = audioType
+                            it.availableType = mediaCodec
                             it.audioType = Media.AudioStreamType.MEDIA
                             it.addAudioConfigs(AudioConfigs.get(Channel.ID_AUD))
                         }.build()

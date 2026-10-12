@@ -1,14 +1,13 @@
 package com.andrerinas.openheadunit.utils
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
-import android.os.Build
 import android.os.IBinder
 import com.andrerinas.openheadunit.App
 import com.andrerinas.openheadunit.aap.ExternalBtPolicy
-import java.lang.reflect.Constructor
 
 object BluetoothHelper {
 
@@ -32,7 +31,8 @@ object BluetoothHelper {
             val iBluetoothManagerClass = Class.forName("android.bluetooth.IBluetoothManager")
             val ctor = BluetoothAdapter::class.java.getDeclaredConstructor(iBluetoothManagerClass)
             ctor.isAccessible = true
-            return ctor.newInstance(managerService) as? BluetoothAdapter
+            @Suppress("UNCHECKED_CAST", "USELESS_CAST")
+            return ctor.newInstance(managerService) as BluetoothAdapter?
         } catch (e: Exception) {
             AppLog.e("BluetoothHelper: Failed to instantiate custom BluetoothAdapter with service $serviceName, falling back: ${e.message}", e)
         }
@@ -40,14 +40,8 @@ object BluetoothHelper {
         return getDefaultAdapter(context)
     }
 
-    private fun getDefaultAdapter(context: Context): BluetoothAdapter? {
-        return if (Build.VERSION.SDK_INT >= 18) {
-            (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
-        } else {
-            @Suppress("DEPRECATION")
-            BluetoothAdapter.getDefaultAdapter()
-        }
-    }
+    private fun getDefaultAdapter(context: Context): BluetoothAdapter? =
+        (context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
     /** Instantiate the BluetoothAdapter backed by a specific system bluetooth service (reflection). */
     private fun adapterForService(context: Context, serviceName: String): BluetoothAdapter? {
@@ -62,7 +56,8 @@ object BluetoothHelper {
             val iBluetoothManagerClass = Class.forName("android.bluetooth.IBluetoothManager")
             val ctor = BluetoothAdapter::class.java.getDeclaredConstructor(iBluetoothManagerClass)
             ctor.isAccessible = true
-            ctor.newInstance(managerService) as? BluetoothAdapter
+            @Suppress("UNCHECKED_CAST", "USELESS_CAST")
+            ctor.newInstance(managerService) as BluetoothAdapter?
         } catch (e: Exception) {
             AppLog.e("BluetoothHelper: adapterForService($serviceName) failed: ${e.message}", e)
             null
@@ -84,12 +79,8 @@ object BluetoothHelper {
             if (service == "bluetooth_manager") continue
             adapterForService(context, service)?.let { result.add(BluetoothAdapterHandle(service, it)) }
         }
-        return result.filter { try { it.adapter.isEnabled } catch (e: Exception) { false } }
+        return result.filter { try { it.adapter.isEnabled } catch (_: Exception) { false } }
     }
-
-    /** All distinct, enabled Bluetooth adapters exposed by the system. See [getAllBluetoothAdapterHandles]. */
-    fun getAllBluetoothAdapters(context: Context): List<BluetoothAdapter> =
-        getAllBluetoothAdapterHandles(context).map { it.adapter }
 
     /**
      * `BluetoothProfile.HEADSET_CLIENT`. Hidden from the SDK, but
@@ -115,6 +106,7 @@ object BluetoothHelper {
      * per-device equivalents are system-only. On a head unit paired with one phone that distinction
      * does not arise; where it does, this errs toward reporting a link.
      */
+    @SuppressLint("MissingPermission")
     fun handsFreeLinkState(context: Context): Boolean? {
         val resolved = try {
             getBluetoothAdapter(context)
@@ -123,14 +115,14 @@ object BluetoothHelper {
             return null
         }
         val adapter = resolved ?: return false
-        val enabled = try { adapter.isEnabled } catch (e: Exception) { null }
+        val enabled = try { adapter.isEnabled } catch (_: Exception) { null }
         if (enabled == false) return false
 
         var readAnyState = false
         for (profile in intArrayOf(PROFILE_HEADSET_CLIENT, BluetoothProfile.HEADSET)) {
             val state = try {
                 adapter.getProfileConnectionState(profile)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // SecurityException without BLUETOOTH_CONNECT, or an adapter that rejects the
                 // hidden client profile. Try the other role before giving up.
                 continue
@@ -154,6 +146,7 @@ object BluetoothHelper {
      * fallback for Android variants that hide BluetoothDevice.isConnected(). Null means the stack
      * would not disclose either result, so callers should avoid showing a false warning.
      */
+    @SuppressLint("MissingPermission")
     fun anyConnectedDeviceState(context: Context): Boolean? {
         val adapter = try { getBluetoothAdapter(context) } catch (_: Exception) { return null }
             ?: return false
@@ -197,6 +190,110 @@ object BluetoothHelper {
     fun isA2dpMediaLinkActive(context: Context): Boolean = a2dpMediaLinkState(context) ?: true
 
     /**
+     * Best-effort: (re)connect A2DP + hands-free (HFP) so hybrid music and in-car call UI work.
+     * Prefer [preferredAddress] when set (the AA Bluetooth peer).
+     *
+     * Uses hidden profile `connect` APIs — may no-op on locked stacks.
+     * Permission is caught: MG4 is platform-signed; missing BLUETOOTH_CONNECT is a no-op.
+     */
+    @SuppressLint("MissingPermission")
+    fun ensureCarBluetoothAudioLink(context: Context, preferredAddress: String? = null): Boolean {
+        val a2dpUp = a2dpMediaLinkState(context) == true
+        val hfpUp = handsFreeLinkState(context) == true
+        if (a2dpUp && hfpUp) return true
+        val adapter = try {
+            getBluetoothAdapter(context)
+        } catch (e: Exception) {
+            AppLog.w("BluetoothHelper: ensureBtAudio — no adapter: ${e.message}")
+            return false
+        } ?: return false
+        try {
+            if (!adapter.isEnabled) {
+                @Suppress("DEPRECATION")
+                adapter.enable()
+            }
+        } catch (e: Exception) {
+            AppLog.w("BluetoothHelper: ensureBtAudio — enable failed: ${e.message}")
+        }
+        val bonded = try {
+            adapter.bondedDevices.orEmpty().toList()
+        } catch (e: Exception) {
+            AppLog.w("BluetoothHelper: ensureBtAudio — bondedDevices failed: ${e.message}")
+            emptyList()
+        }
+        if (bonded.isEmpty()) {
+            AppLog.w("BluetoothHelper: ensureBtAudio — no bonded devices")
+            return false
+        }
+        val preferred = preferredAddress?.trim()?.uppercase(java.util.Locale.US).orEmpty()
+        val ordered = if (preferred.isEmpty()) {
+            bonded
+        } else {
+            bonded.sortedByDescending { it.address?.uppercase(java.util.Locale.US) == preferred }
+        }
+        var asked = false
+        for (device in ordered) {
+            if (!a2dpUp) {
+                asked = requestProfileConnect(adapter, context, device, BluetoothProfile.A2DP) || asked
+                asked = requestProfileConnect(adapter, context, device, PROFILE_A2DP_SINK) || asked
+            }
+            if (!hfpUp) {
+                asked = requestProfileConnect(adapter, context, device, BluetoothProfile.HEADSET) || asked
+                asked = requestProfileConnect(adapter, context, device, PROFILE_HEADSET_CLIENT) || asked
+            }
+            // Classic ACL connect also wakes profiles on some SAIC stacks.
+            try {
+                val connect = device.javaClass.getMethod("connect")
+                val ok = connect.invoke(device) as? Boolean
+                AppLog.i("BluetoothHelper: ensureBtAudio device.connect(${device.address}) → $ok")
+                asked = true
+            } catch (e: Exception) {
+                AppLog.d("BluetoothHelper: ensureBtAudio device.connect unavailable: ${e.message}")
+            }
+        }
+        return asked
+    }
+
+    private fun requestProfileConnect(
+        adapter: BluetoothAdapter,
+        context: Context,
+        device: android.bluetooth.BluetoothDevice,
+        profile: Int,
+    ): Boolean {
+        return try {
+            val listener = object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profileId: Int, proxy: BluetoothProfile) {
+                    try {
+                        val connect = proxy.javaClass.methods.firstOrNull { method ->
+                            method.name == "connect" &&
+                                method.parameterTypes.size == 1 &&
+                                method.parameterTypes[0].isAssignableFrom(android.bluetooth.BluetoothDevice::class.java)
+                        }
+                        val ok = connect?.invoke(proxy, device) as? Boolean
+                        AppLog.i(
+                            "BluetoothHelper: ensureBtAudio profile=$profileId " +
+                                "connect(${device.address}) → $ok",
+                        )
+                    } catch (e: Exception) {
+                        AppLog.w("BluetoothHelper: ensureBtAudio profile=$profileId connect failed: ${e.message}")
+                    } finally {
+                        try {
+                            adapter.closeProfileProxy(profileId, proxy)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+
+                override fun onServiceDisconnected(profileId: Int) {}
+            }
+            adapter.getProfileProxy(context.applicationContext, listener, profile)
+        } catch (e: Exception) {
+            AppLog.w("BluetoothHelper: ensureBtAudio getProfileProxy($profile) failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
      * The same probe as [isA2dpMediaLinkActive], but saying so when it does not know: null means no
      * profile state could be read at all, rather than "no link".
      *
@@ -206,6 +303,7 @@ object BluetoothHelper {
      * annoyance and buttons that quietly do nothing are a broken app. Neither default is right for
      * both, so the resolution belongs to the caller.
      */
+    @SuppressLint("MissingPermission")
     fun a2dpMediaLinkState(context: Context): Boolean? {
         // The configured adapter only, never getAllBluetoothAdapterHandles(): this is called on the
         // AAP transport thread every time a track starts, and enumerating the system service list
@@ -219,14 +317,14 @@ object BluetoothHelper {
         if (adapter == null) return false
         // An adapter that will not say whether it is on is treated as on, and left to the profile
         // probe below to decide.
-        val enabled = try { adapter.isEnabled } catch (e: Exception) { true }
+        val enabled = try { adapter.isEnabled } catch (_: Exception) { true }
         if (!enabled) return false
 
         var readAnyState = false
         for (profile in intArrayOf(BluetoothProfile.A2DP, PROFILE_A2DP_SINK)) {
             val state = try {
                 adapter.getProfileConnectionState(profile)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // SecurityException without BLUETOOTH_CONNECT, or an adapter that rejects the
                 // hidden sink profile. Try the other one before giving up.
                 continue
@@ -256,14 +354,14 @@ object BluetoothHelper {
         val resolvedName = if (serviceExists(input)) input else findServiceNameByInterfaceDescriptor(input) ?: input
         val adapter = adapterForService(context, resolvedName) ?: return null
         return try { if (adapter.isEnabled) BluetoothAdapterHandle(resolvedName, adapter) else null }
-        catch (e: Exception) { null }
+        catch (_: Exception) { null }
     }
 
     private fun serviceExists(name: String): Boolean = try {
         val serviceManagerClass = Class.forName("android.os.ServiceManager")
         val getServiceMethod = serviceManagerClass.getMethod("getService", String::class.java)
         getServiceMethod.invoke(null, name) != null
-    } catch (e: Exception) { false }
+    } catch (_: Exception) { false }
 
     /** Reverse-looks-up a system service by its AIDL interface descriptor (the bracketed part of
      *  `adb shell service list` output) instead of its name (the part before the colon).
@@ -275,12 +373,13 @@ object BluetoothHelper {
             val serviceManagerClass = Class.forName("android.os.ServiceManager")
             val listServicesMethod = serviceManagerClass.getMethod("listServices")
             val getServiceMethod = serviceManagerClass.getMethod("getService", String::class.java)
+            @Suppress("UNCHECKED_CAST")
             val services = listServicesMethod.invoke(null) as? Array<String> ?: return null
             services.firstOrNull { name ->
                 try {
                     val binder = getServiceMethod.invoke(null, name) as? IBinder
                     binder?.interfaceDescriptor == descriptor
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     false
                 }
             }
@@ -295,6 +394,7 @@ object BluetoothHelper {
      * On Android 6+ (API 23+), adapter.address returns dummy "02:00:00:00:00:00".
      * We fall back to reflection and Chinese OEM SystemProperties to find the true hardware BDADDR.
      */
+    @SuppressLint("MissingPermission", "HardwareIds")
     fun getBluetoothMacAddress(context: Context, adapter: BluetoothAdapter? = null): String? {
         val targetAdapter = adapter ?: getBluetoothAdapter(context)
         
@@ -304,9 +404,9 @@ object BluetoothHelper {
             if (!addr.isNullOrEmpty() && addr != "02:00:00:00:00:00" && addr != "00:00:00:00:00:00") {
                 return addr.uppercase()
             }
-        } catch (e: SecurityException) {
+        } catch (_: SecurityException) {
             AppLog.w("BluetoothHelper: SecurityException reading adapter address")
-        } catch (e: Exception) {}
+        } catch (_: Exception) {}
 
         // 2. Try reflection via hidden getAddress() on BluetoothAdapter / IBluetooth
         try {
@@ -318,7 +418,7 @@ object BluetoothHelper {
                     return addr.uppercase()
                 }
             }
-        } catch (e: Exception) {}
+        } catch (_: Exception) {}
 
         // 3. Fallback to Chinese Headunit Vendor System Properties
         val propKeys = arrayOf(
@@ -356,7 +456,7 @@ object BluetoothHelper {
      */
     val externalBtEvidence: String? by lazy {
         ExternalBtPolicy.detect(
-            nodeExists = { path -> try { java.io.File(path).exists() } catch (e: Exception) { false } },
+            nodeExists = { path -> try { java.io.File(path).exists() } catch (_: Exception) { false } },
             property = { key -> SystemProperties.get(key, "") }
         )
     }
@@ -373,6 +473,7 @@ object BluetoothHelper {
         try {
             val serviceManagerClass = Class.forName("android.os.ServiceManager")
             val listServicesMethod = serviceManagerClass.getMethod("listServices")
+            @Suppress("UNCHECKED_CAST")
             val services = listServicesMethod.invoke(null) as? Array<String>
             if (services != null) {
                 for (service in services) {
@@ -395,7 +496,7 @@ object BluetoothHelper {
     fun getAdapterDescription(context: Context, serviceName: String): String {
         if (serviceName == "bluetooth_manager") {
             val adapter = getDefaultAdapter(context)
-            val name = try { adapter?.name } catch (e: SecurityException) { null }
+            val name = try { adapter?.name } catch (_: SecurityException) { null }
             val address = getBluetoothMacAddress(context, adapter)
             val suffix = if (!name.isNullOrEmpty()) " ($name)" else ""
             val addrSuffix = if (!address.isNullOrEmpty()) " [$address]" else ""
@@ -414,13 +515,14 @@ object BluetoothHelper {
             val iBluetoothManagerClass = Class.forName("android.bluetooth.IBluetoothManager")
             val ctor = BluetoothAdapter::class.java.getDeclaredConstructor(iBluetoothManagerClass)
             ctor.isAccessible = true
-            val adapter = ctor.newInstance(managerService) as? BluetoothAdapter
-            val name = try { adapter?.name } catch (e: SecurityException) { null }
+            @Suppress("UNCHECKED_CAST", "USELESS_CAST")
+            val adapter = ctor.newInstance(managerService) as BluetoothAdapter?
+            val name = try { adapter?.name } catch (_: SecurityException) { null }
             val address = getBluetoothMacAddress(context, adapter)
             val suffix = if (!name.isNullOrEmpty()) " ($name)" else ""
             val addrSuffix = if (!address.isNullOrEmpty()) " [$address]" else ""
             return "Secondary ($serviceName)$suffix$addrSuffix"
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return "Secondary ($serviceName)"
         }
     }

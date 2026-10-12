@@ -930,7 +930,7 @@ class AapService : Service(), UsbReceiver.Listener {
 
         // One probe at connect is enough: the sink only pauses on a focus-loss *event*, so a
         // Bluetooth link that comes up later in the session never sees one.
-        val mode = settings.effectivePlaybackFocusMode
+        val mode = settings.effectivePlaybackFocusMode(this)
         val btMediaLinkActive = BluetoothHelper.isA2dpMediaLinkActive(this)
         if (!PlaybackFocusPolicy.shouldAcquirePermanent(
                 mode = mode,

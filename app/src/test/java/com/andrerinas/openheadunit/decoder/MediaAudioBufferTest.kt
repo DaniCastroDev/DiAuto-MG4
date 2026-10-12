@@ -10,6 +10,8 @@ class MediaAudioBufferTest {
         assertEquals(500, MediaAudioBuffer.sanitize(500))
         assertEquals(750, MediaAudioBuffer.sanitize(750))
         assertEquals(1000, MediaAudioBuffer.sanitize(1000))
+        assertEquals(1250, MediaAudioBuffer.sanitize(1250))
+        assertEquals(1500, MediaAudioBuffer.sanitize(1500))
     }
 
     @Test

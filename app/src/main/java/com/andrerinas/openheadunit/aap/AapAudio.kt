@@ -24,7 +24,9 @@ internal class AapAudio(
         private val context: Context) {
 
     private val staticAudioFocus = settings.staticAudioFocus
-    private val separateAudioStreams = settings.separateAudioStreams
+    // Hybrid Bluetooth music: keep assistant/nav off STREAM_MUSIC so Gemini is not lost under A2DP.
+    private val separateAudioStreams =
+        settings.separateAudioStreams || settings.musicViaBluetooth
     private val mediaVolumeOffset = settings.mediaVolumeOffset
     private val assistantVolumeOffset = settings.assistantVolumeOffset
     private val navigationVolumeOffset = settings.navigationVolumeOffset
@@ -34,7 +36,20 @@ internal class AapAudio(
     private val enableAudioSink = settings.enableAudioSink
     private val attachHwDspEqualizer = settings.attachHwDspEqualizer
     private val mediaBufferMillis = settings.mediaAudioBufferMillis
-    private val playbackFocusMode = settings.effectivePlaybackFocusMode
+    private fun playbackFocusMode() = settings.effectivePlaybackFocusMode(context)
+
+    /**
+     * Hybrid sets focus mode NEVER so A2DP music is not AVRCP-paused. Assistant (AU1) and
+     * system/nav (AU2) still need focus or Gemini/TTS stays on the phone speaker.
+     */
+    private fun playbackFocusModeForChannel(channel: Int) =
+        if (settings.musicViaBluetooth &&
+            (channel == Channel.ID_AU1 || channel == Channel.ID_AU2)
+        ) {
+            PlaybackFocusPolicy.Mode.ALWAYS
+        } else {
+            playbackFocusMode()
+        }
 
     private var audioFocusRequest: AudioFocusRequest? = null
     private var legacyFocusListener: AudioManager.OnAudioFocusChangeListener? = null
@@ -123,11 +138,15 @@ internal class AapAudio(
         if (isRelease) return true
 
         val btMediaLinkActive = BluetoothHelper.isA2dpMediaLinkActive(context)
-        // isAudioChannel: the notification arrives on the control channel, but the question being
-        // asked is about audio focus. The flag means "this is an audio-focus decision", not "this
-        // message came in on an audio channel".
+        // Hybrid NEVER is for media/A2DP only. Protocol focus (Gemini, nav prompts) must still
+        // duck the car so TTS is not left on the phone speaker.
+        val mode = if (settings.musicViaBluetooth) {
+            PlaybackFocusPolicy.Mode.ALWAYS
+        } else {
+            playbackFocusMode()
+        }
         val honour = PlaybackFocusPolicy.shouldAcquire(
-                mode = playbackFocusMode,
+                mode = mode,
                 staticAudioFocus = staticAudioFocus,
                 audioSinkEnabled = enableAudioSink,
                 isAudioChannel = true,
@@ -136,7 +155,7 @@ internal class AapAudio(
 
         if (!honour) {
             AppLog.i("AapAudio: phone asked for audio focus - leaving system audio focus alone " +
-                    "(mode=$playbackFocusMode, bluetoothMedia=$btMediaLinkActive, latched=$selfDefeatingLatched)")
+                    "(mode=$mode, bluetoothMedia=$btMediaLinkActive, latched=$selfDefeatingLatched)")
         }
         return honour
     }
@@ -288,6 +307,8 @@ internal class AapAudio(
 
         val config = AudioConfigs.get(channel)
         val stream = AudioConfigs.stream(channel, separateAudioStreams)
+        // AAC only on MEDIA — matches Service Discovery (SPEECH/SYSTEM are PCM).
+        val channelUsesAac = useAacAudio && channel == Channel.ID_AUD
 
         val offset = when (channel) {
             Channel.ID_AUD -> mediaVolumeOffset
@@ -313,7 +334,7 @@ internal class AapAudio(
         AppLog.i(
             "AudioDecoder.start: channel=$channel, stream=$stream, gain=$gain, " +
                 "sampleRate=${config.sampleRate}, numberOfBits=${config.numberOfBits}, " +
-                "numberOfChannels=${config.numberOfChannels}, isAac=$useAacAudio, " +
+                "numberOfChannels=${config.numberOfChannels}, isAac=$channelUsesAac, " +
                 "latencyMultiplier=$effectiveMultiplier, queueCapacity=$audioQueueCapacity, " +
                 "mediaJitterMs=$jitterMs, attachHwDspEqualizer=$attachHwDspEqualizer",
         )
@@ -323,7 +344,7 @@ internal class AapAudio(
             config.sampleRate,
             config.numberOfBits,
             config.numberOfChannels,
-            useAacAudio,
+            channelUsesAac,
             gain,
             effectiveMultiplier,
             audioQueueCapacity,
@@ -348,8 +369,9 @@ internal class AapAudio(
         if (!wasEmpty) return
 
         val btMediaLinkActive = BluetoothHelper.isA2dpMediaLinkActive(context)
+        val mode = playbackFocusModeForChannel(channel)
         val acquire = PlaybackFocusPolicy.shouldAcquire(
-                mode = playbackFocusMode,
+                mode = mode,
                 staticAudioFocus = staticAudioFocus,
                 audioSinkEnabled = enableAudioSink,
                 isAudioChannel = true,
@@ -358,7 +380,7 @@ internal class AapAudio(
 
         if (!acquire) {
             AppLog.i("AapAudio: AA audio started (${Channel.name(channel)}) - leaving system audio focus alone " +
-                    "(mode=$playbackFocusMode, bluetoothMedia=$btMediaLinkActive, latched=$selfDefeatingLatched)")
+                    "(mode=$mode, bluetoothMedia=$btMediaLinkActive, latched=$selfDefeatingLatched)")
             return
         }
 
@@ -367,7 +389,7 @@ internal class AapAudio(
         // abandon focus. TRANSIENT sends AUDIOFOCUS_LOSS_TRANSIENT so they pause and resume
         // once AA audio stops and we release focus.
         AppLog.i("AapAudio: AA audio started (${Channel.name(channel)}) - acquiring transient system audio focus " +
-                "(mode=$playbackFocusMode, bluetoothMedia=$btMediaLinkActive)")
+                "(mode=$mode, bluetoothMedia=$btMediaLinkActive)")
         focusAcquiredAtMs = SystemClock.elapsedRealtime()
         holdingPlaybackFocus = true
         requestPlaybackFocus()

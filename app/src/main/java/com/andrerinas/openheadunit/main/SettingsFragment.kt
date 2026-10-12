@@ -80,7 +80,8 @@ class SettingsFragment : Fragment() {
     // Wireless items here only appear in Basic when the user connects wirelessly (see filterSettings).
     private val basicSettingIds = setOf(
         "staticBSSID", "appLanguage", "autoStartSettings", "autoConnectSettings", "resolution",
-        "dpiPixelDensity", "viewMode", "fpsLimit", "musicViaBluetooth", "enableAudioSink", "mediaAudioBuffer", "micSettings", "audioVolumeOffsets",
+        "dpiPixelDensity", "viewMode", "fpsLimit", "musicViaBluetooth",
+        "enableAudioSink", "mediaAudioBuffer", "micSettings", "audioVolumeOffsets",
         "keymap", "version", "about", "otaBeta", "otaStatus", "otaCheck",
     )
 
@@ -1635,6 +1636,18 @@ class SettingsFragment : Fragment() {
                 updateSettingsList()
             }
         ))
+
+        if (pendingMusicViaBluetooth) {
+            items.add(SettingItem.InfoBanner(
+                stableId = "hybridBtCallsHint",
+                textResId = R.string.da_hybrid_bt_calls_hint,
+            ))
+        } else if (pendingEnableAudioSink == true) {
+            items.add(SettingItem.InfoBanner(
+                stableId = "wifiMusicTrialHint",
+                textResId = R.string.da_wifi_music_trial_hint,
+            ))
+        }
 
         items.add(SettingItem.ToggleSettingEntry(
             stableId = "enableAudioSink",

@@ -510,7 +510,7 @@ class CommManager(
             // And even in static mode, not when the player we would evict is the head unit's own
             // A2DP sink: it answers by AVRCP-pausing the phone that is about to project to us.
             if (settings.enableAudioSink && settings.staticAudioFocus) {
-                val mode = settings.effectivePlaybackFocusMode
+                val mode = settings.effectivePlaybackFocusMode(context)
                 val btMediaLinkActive = BluetoothHelper.isA2dpMediaLinkActive(context)
                 if (PlaybackFocusPolicy.shouldAcquirePermanent(
                         mode = mode,
