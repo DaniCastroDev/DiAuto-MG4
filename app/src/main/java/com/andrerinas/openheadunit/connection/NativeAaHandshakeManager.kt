@@ -57,17 +57,17 @@ class NativeAaHandshakeManager(
          *  a handshake. P2P group creation is the slow case. */
         private const val CREDENTIALS_WAIT_MS = 60_000L
 
-        /** How long to wait for the AAP TCP port to be bound before giving up on a handshake. */
-        private const val PORT_WAIT_MS = 3_000L
+        /** How long to wait for the AAP TCP port to be bound before giving up on a handshake.
+         *  After a user disconnect SoftAP/listener rebuild often exceeds 3s on MG4. */
+        private const val PORT_WAIT_MS = 12_000L
 
         /**
          * How long to wait for the port after asking for the server to be (re)started.
          *
-         * Deliberately short. [awaitWirelessServerListening] delays without pumping the session's
-         * inbound channel, so everything spent here is time the phone's keepalives go unserviced;
-         * the bind's own retry budget is under two seconds, so this only has to cover it.
+         * Covers SoftAP rebind after exit; keep under the WPP credential window so the phone
+         * is not left waiting forever if the bind truly failed.
          */
-        private const val PORT_ENSURE_MS = 4_000L
+        private const val PORT_ENSURE_MS = 10_000L
 
         /** Which of [allServiceNames] are secondary Bluetooth radios, i.e. not [primaryServiceName]
          *  (dual-Bluetooth-radio head units). Pure and unit-testable: identity is by system

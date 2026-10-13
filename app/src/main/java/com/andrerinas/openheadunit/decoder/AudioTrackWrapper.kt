@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import com.evsuite.hardware.saic.SaicCarAudioSource
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -453,11 +454,18 @@ class AudioTrackWrapper(
                 )
             }
 
-            val audioAttributes = AudioAttributes.Builder()
+            val attrBuilder = AudioAttributes.Builder()
                 .setUsage(usage)
                 .setContentType(contentType)
                 .setLegacyStreamType(stream)
-                .build()
+            // MEDIA stream: tag as Android Auto (70) so eh32 amp routes Wi‑Fi PCM.
+            if (usage == AudioAttributes.USAGE_MEDIA) {
+                SaicCarAudioSource.attachSourceType(
+                    attrBuilder,
+                    SaicCarAudioSource.SRC_ANDROID_AUTO,
+                )
+            }
+            val audioAttributes = attrBuilder.build()
 
             val audioFormat = AudioFormat.Builder()
                 .setSampleRate(sampleRateInHz)

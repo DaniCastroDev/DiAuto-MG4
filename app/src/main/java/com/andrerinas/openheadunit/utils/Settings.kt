@@ -126,9 +126,13 @@ class Settings(private val context: Context) {
             prefs.edit().putBoolean("show-navigation-notifications", value).apply()
         }
 
-    /** Mirror phone now-playing (title, artist, duration, art) in the system media session. */
+    /**
+     * Mirror phone now-playing (title, artist, duration, art) in the system media session —
+     * same “AA is publishing” surface Allgo shows on the car media card. Key bumped so
+     * upgrades default ON.
+     */
     var syncMediaSessionWithAaMetadata: Boolean
-        get() = prefs.getBoolean(KEY_SYNC_MEDIA_SESSION_AA_METADATA, false)
+        get() = prefs.getBoolean(KEY_SYNC_MEDIA_SESSION_AA_METADATA, true)
         set(value) {
             prefs.edit().putBoolean(KEY_SYNC_MEDIA_SESSION_AA_METADATA, value).apply()
         }
@@ -689,10 +693,10 @@ class Settings(private val context: Context) {
 
     /**
      * Hybrid: AA video over Wi‑Fi, music on car Bluetooth/A2DP (MEDIA sink omitted — Wi‑Fi
-     * media PCM stutters on MG4). Key bumped again so upgrades reset to off (Wi‑Fi audio trial).
+     * media PCM stutters on MG4). Key bumped to v4 so upgrades pick up default ON.
      */
     var musicViaBluetooth: Boolean
-        get() = prefs.getBoolean(KEY_MUSIC_VIA_BLUETOOTH, false)
+        get() = prefs.getBoolean(KEY_MUSIC_VIA_BLUETOOTH, true)
         set(value) { prefs.edit().putBoolean(KEY_MUSIC_VIA_BLUETOOTH, value).apply() }
 
     /**
@@ -1133,16 +1137,17 @@ class Settings(private val context: Context) {
         const val CONNECTION_TYPE_USB = "usb"
         const val CONNECTION_TYPE_NEARBY = "nearby"
 
-        /** SharedPreferences key; also used by [AapService] for change listener. */
-        const val KEY_SYNC_MEDIA_SESSION_AA_METADATA = "sync-media-session-aa-metadata"
+        /** SharedPreferences key; also used by [AapService] for change listener.
+         *  Was sync-media-session-aa-metadata (default OFF). v2 defaults ON for Allgo-like publish. */
+        const val KEY_SYNC_MEDIA_SESSION_AA_METADATA = "sync-media-session-aa-metadata-v2"
 
         /** SharedPreferences key; also used by [AapService] for change listener. */
         // Was "log-level" (default Info). Renamed so upgrades reset to Silent.
         const val KEY_LOG_LEVEL = "log-level-v2"
         const val KEY_LOG_SOURCE = "log-source"
         const val KEY_LOG_LOCATION = "log-location"
-        // Was music-via-bluetooth / v2 (default ON). v3 resets upgrades to OFF.
-        const val KEY_MUSIC_VIA_BLUETOOTH = "music-via-bluetooth-v3"
+        // Was music-via-bluetooth / v2 (ON) / v3 (OFF). v4 resets upgrades to ON (hybrid default).
+        const val KEY_MUSIC_VIA_BLUETOOTH = "music-via-bluetooth-v4"
         // Was stretch_to_fill (default ON). v2 resets upgrades to OFF.
         const val KEY_STRETCH_TO_FILL = "stretch-to-fill-v2"
         // Was auto-enable-hotspot (default OFF). v2 resets upgrades to ON.

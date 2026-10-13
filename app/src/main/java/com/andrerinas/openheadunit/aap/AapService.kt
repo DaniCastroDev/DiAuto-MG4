@@ -77,6 +77,7 @@ import com.andrerinas.openheadunit.main.BackgroundNotification
 import android.annotation.SuppressLint
 import com.andrerinas.openheadunit.utils.Settings
 import com.andrerinas.openheadunit.utils.protoUint32ToLong
+import com.evsuite.hardware.saic.SaicCarAudioSource
 import com.evsuite.hardware.saic.SaicMediaPlayer
 import com.evsuite.hardware.saic.SaicRadio
 import java.net.ServerSocket
@@ -306,6 +307,9 @@ class AapService : Service(), UsbReceiver.Listener {
     /** In-flight poke that may be waiting out [USER_EXIT_COOLDOWN_MS]. */
     private var nativeAaPokeJob: Job? = null
 
+    /** Sticky SAIC SRC_AA claim while Wi‑Fi AA music is the active session. */
+    private var saicAaMediaClaimJob: Job? = null
+
     /**
      * Automatic reconnect / discovery restarts after unexpected disconnects.
      * Reset on a successful handshake so a later mid-drive drop can retry again.
@@ -345,11 +349,15 @@ class AapService : Service(), UsbReceiver.Listener {
     }
 
     private fun applyPlaceholderMediaMetadata() {
+        val aa = getString(R.string.video) // "Android Auto"
         safeMediaSessionCall {
             it.setMetadata(
                 MediaMetadataCompat.Builder()
-                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, getString(R.string.video))
+                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, aa)
                     .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, getString(R.string.media_session_aa_status_placeholder))
+                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, aa)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, aa)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, getString(R.string.media_session_aa_status_placeholder))
                     .build()
             )
         }
@@ -468,12 +476,16 @@ class AapService : Service(), UsbReceiver.Listener {
             meta.hasArtist() && meta.artist.isNotBlank() -> meta.artist
             else -> getString(R.string.media_session_aa_status_placeholder)
         }
+        val aaLabel = getString(R.string.video)
         val b = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
-        if (meta.hasAlbum() && meta.album.isNotBlank()) {
-            b.putString(MediaMetadataCompat.METADATA_KEY_ALBUM, meta.album)
-        }
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, artist)
+            .putString(
+                MediaMetadataCompat.METADATA_KEY_ALBUM,
+                if (meta.hasAlbum() && meta.album.isNotBlank()) meta.album else aaLabel,
+            )
         if (meta.hasDurationSeconds()) {
             val durationSec = meta.durationSeconds.protoUint32ToLong()
             if (durationSec > 0L) {
@@ -950,13 +962,12 @@ class AapService : Service(), UsbReceiver.Listener {
                 "(mode=$mode, bluetoothMedia=$btMediaLinkActive)")
 
         try {
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val audioManager = SaicCarAudioSource.audioManager(this)
+                ?: getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (permanentFocusRequest == null) {
-                    val attrs = AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
+                    // eh32 amp routes by key_car_source_type on the focus attrs (70 = AA).
+                    val attrs = SaicCarAudioSource.mediaAttributes()
                     permanentFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                         .setAudioAttributes(attrs)
                         .setWillPauseWhenDucked(false)
@@ -990,7 +1001,8 @@ class AapService : Service(), UsbReceiver.Listener {
      */
     private fun releasePermanentAudioFocus() {
         try {
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val audioManager = SaicCarAudioSource.audioManager(this)
+                ?: getSystemService(Context.AUDIO_SERVICE) as AudioManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 permanentFocusRequest?.let {
                     audioManager.abandonAudioFocusRequest(it)
@@ -1052,6 +1064,9 @@ class AapService : Service(), UsbReceiver.Listener {
         requestPermanentAudioFocus()
 
         maybeSwitchCarToBtMusic()
+        // Wi‑Fi music: claim SAIC Android Auto source early (Allgo-style medya yayını) and
+        // keep it sticky; A2DP release below re-claims after the BT handoff settles.
+        startSaicAndroidAutoMediaPublication()
         maybeReleaseCarBtMediaForWifiAudio()
 
         // Start GpsLocationService and NightModeManager sensor tracking
@@ -1137,8 +1152,8 @@ class AapService : Service(), UsbReceiver.Listener {
     }
 
     /**
-     * Ask SAIC MediaService to select Android Auto as the current source — same CPAA path
-     * Allgo uses so the car screen/amp know music is an AA publication, not leftover radio.
+     * Claim Android Auto as the car media source so the amp leaves radio/BT.
+     * SWI68 CPAA binder when present; on eh32 [SaicCarAudioSource] AudioFocus + type 70.
      */
     private suspend fun claimSaicAndroidAutoMediaSource() {
         try {
@@ -1149,14 +1164,43 @@ class AapService : Service(), UsbReceiver.Listener {
                         "AapService: car media source switched to Android Auto " +
                             "(attempt ${attempt + 1})",
                     )
-                    updateMediaSessionState(true)
+                    withContext(Dispatchers.Main) {
+                        updateMediaSessionState(true)
+                        if (lastAaMediaMetadata == null) applyPlaceholderMediaMetadata()
+                    }
                     return
                 }
                 delay(250)
             }
-            AppLog.w("AapService: could not switch car to AA media source (CPAA not ready)")
+            AppLog.w("AapService: could not switch car to AA media source")
         } catch (e: Exception) {
             AppLog.w("AapService: AA media source switch failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Allgo-style AA medya yayını for Wi‑Fi music: pause radio, claim SRC_AA immediately,
+     * then re-claim while the session stays up if the car drifts back to radio/BT.
+     */
+    private fun startSaicAndroidAutoMediaPublication() {
+        saicAaMediaClaimJob?.cancel()
+        if (settings.musicViaBluetooth) return
+        saicAaMediaClaimJob = serviceScope.launch(Dispatchers.IO) {
+            silenceSaicRadioForWifiAudio()
+            claimSaicAndroidAutoMediaSource()
+            while (isActive) {
+                delay(8_000L)
+                if (settings.musicViaBluetooth) return@launch
+                when (commManager.connectionState.value) {
+                    is CommManager.ConnectionState.Disconnected,
+                    is CommManager.ConnectionState.Error -> return@launch
+                    else -> Unit
+                }
+                if (SaicMediaPlayer.isAndroidAutoSource()) continue
+                AppLog.i("AapService: SAIC source left Android Auto — re-claiming (Allgo-style publish)")
+                silenceSaicRadioForWifiAudio()
+                claimSaicAndroidAutoMediaSource()
+            }
         }
     }
 
@@ -1241,10 +1285,22 @@ class AapService : Service(), UsbReceiver.Listener {
 
     private fun setupMediaSession() {
         val mbr = ComponentName(this, MediaButtonReceiver::class.java)
-        mediaSession = MediaSessionCompat(this, "HeadunitRevived", mbr, null).apply {
+        // Tag matches what the car media stack looks for when Allgo publishes AA.
+        mediaSession = MediaSessionCompat(this, "Android Auto", mbr, null).apply {
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            setSessionActivity(
+                PendingIntent.getActivity(
+                    this@AapService,
+                    0,
+                    AapProjectionActivity.intent(this@AapService).apply {
+                        putExtra(AapProjectionActivity.EXTRA_FOCUS, true)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                    },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
             )
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onMediaButtonEvent(mediaButtonEvent: Intent?): Boolean {
@@ -1330,6 +1386,8 @@ class AapService : Service(), UsbReceiver.Listener {
         // Release any permanent audio focus we may have requested when connected
         releasePermanentAudioFocus()
         App.provide(this).carKeysManager.unregisterReceivers()
+        saicAaMediaClaimJob?.cancel()
+        saicAaMediaClaimJob = null
 
         if (!isDestroying) updateNotification()
         mediaMetadataDecodeJob?.cancel()
@@ -3930,9 +3988,9 @@ class AapService : Service(), UsbReceiver.Listener {
          */
         private const val LINK_LOSS_TEARDOWN_BUDGET_MS = 1500L
 
-        /** Cooldown period after user-initiated exit. During this window, the WirelessServer
-         *  rejects incoming connections to prevent the phone from instantly reconnecting. */
-        private const val USER_EXIT_COOLDOWN_MS = 5000L
+        /** Cooldown after user-initiated exit. SoftAP restart on MG4 often needs ~10–20s;
+         *  poking while :5288 / hotspot are still down fails with a short wait. */
+        private const val USER_EXIT_COOLDOWN_MS = 15_000L
 
         /** Delay before AapService tries to handle a normal-mode USB attach as a fallback
          *  when UsbAttachedActivity doesn't fire (common on Chinese MediaTek headunits). */

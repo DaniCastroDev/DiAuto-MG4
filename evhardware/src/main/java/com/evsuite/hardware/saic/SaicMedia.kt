@@ -15,6 +15,16 @@ object SaicRadio {
     private const val ACTION = "com.saicmotor.service.radio.radioservice"
     private const val DESCRIPTOR = "com.saicmotor.sdk.radio.IRadioAppService"
 
+    /** A9 / eh32 (`Radio_eh32_ll`) — `IRadioManager` on `com.saicmotor.radio`. */
+    private const val PACKAGE_EH32 = "com.saicmotor.radio"
+    private const val ACTION_EH32 = "com.saicmotor.IRadioService"
+    private const val CLASS_EH32 = "com.saicmotor.radio.service.RadioService"
+    private const val DESCRIPTOR_EH32 = "com.android.car.radio.service.IRadioManager"
+    private const val TX_EH32_MUTE = 9
+    private const val TX_EH32_MEDIA_PAUSE = 31
+    private const val TX_EH32_HAS_FOCUS = 18
+    private const val TX_EH32_IS_MUTED = 12
+
     private const val TX_TUNE = 8
     private const val TX_NEXT = 13
     private const val TX_PREVIOUS = 14
@@ -29,10 +39,15 @@ object SaicRadio {
     const val BAND_DAB = 4
 
     private val service = SaicService(PACKAGE, ACTION, "radio")
+    private val serviceEh32 =
+        SaicService.byActionAndComponent(PACKAGE_EH32, ACTION_EH32, CLASS_EH32, "radio-eh32")
 
-    val isAvailable: Boolean get() = service.isReady
+    val isAvailable: Boolean get() = service.isReady || serviceEh32.isReady
 
-    fun connect(context: Context) = service.connect(context)
+    fun connect(context: Context) {
+        service.connect(context)
+        serviceEh32.connect(context)
+    }
 
     /**
      * Makes radio the current audio source, resuming the last station.
@@ -49,11 +64,16 @@ object SaicRadio {
     /**
      * Silences the radio and marks it stopped — `srcPauseRadio`, the counterpart of [play].
      *
-     * It mutes the tuner rather than handing the audio focus back: the vendor service only
-     * abandons focus when it loses it, so whatever was playing before the radio took over
-     * does not resume on its own. Silence is the most this service offers.
+     * SWI68 path: vendor `srcPauseRadio`. eh32: `IRadioManager.mute(true)` plus
+     * `onMediaSessionPause` so the radio MediaSession leaves PLAYING (SystemUI card).
      */
-    fun pause(): Boolean = SaicAidl.callVoid(service.binder(), DESCRIPTOR, TX_SRC_PAUSE)
+    fun pause(): Boolean {
+        if (SaicAidl.callVoid(service.binder(), DESCRIPTOR, TX_SRC_PAUSE)) return true
+        val eh = serviceEh32.binder() ?: return false
+        val muted = SaicAidl.callBoolean(eh, DESCRIPTOR_EH32, TX_EH32_MUTE, true) ?: false
+        val paused = SaicAidl.callVoid(eh, DESCRIPTOR_EH32, TX_EH32_MEDIA_PAUSE)
+        return muted || paused
+    }
 
     /**
      * Tunes a frequency in kHz (FM 87500–108000), playing it or leaving it silent.
@@ -137,7 +157,18 @@ object SaicRadio {
      * is **false while the radio plays**, its stream not being the music one. A play/pause
      * shortcut driven by it would send "play" to a radio that is already playing, forever.
      */
-    fun isPlaying(): Boolean? = currentStation()?.playing
+    fun isPlaying(): Boolean? =
+        currentStation()?.playing
+            ?: eh32Playing()
+
+    /** eh32: focused and not muted counts as playing (no RadioBean on this binder). */
+    private fun eh32Playing(): Boolean? {
+        val eh = serviceEh32.binder() ?: return null
+        val focus = SaicAidl.callBoolean(eh, DESCRIPTOR_EH32, TX_EH32_HAS_FOCUS) ?: return null
+        if (!focus) return false
+        val muted = SaicAidl.callBoolean(eh, DESCRIPTOR_EH32, TX_EH32_IS_MUTED)
+        return muted != true
+    }
 
     /** What the tuner is on right now, or null when the question could not be put. */
     data class Tuned(val band: Int, val frequencyKhz: Int, val playing: Boolean)

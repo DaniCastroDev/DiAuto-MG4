@@ -125,6 +125,10 @@ object SaicMediaPlayer {
     private const val RUI_CLASS = "com.allgo.rui.RemoteUIService"
     private const val DESC_RUI = "com.allgo.rui.IRemoteUIService"
     private const val TX_RUI_MEDIA_KEY = 0x12
+    /** `launchApp(appType, remoteUiType)` — stock uses (1, 2) for AA music. */
+    private const val TX_RUI_LAUNCH_APP = 8
+    private const val RUI_APP_MUSIC = 1
+    private const val RUI_TYPE_ANDROID_AUTO = 2
 
     /**
      * `sendMediaPlayControlKey` values. Skip carries a press and a release: leaving a key
@@ -219,27 +223,51 @@ object SaicMediaPlayer {
      * so the launcher music card and amp know AA is publishing — not radio sitting on top of
      * a silent Wi‑Fi PCM stream.
      *
-     * Mirrors [switchToBluetooth]: request audio focus on [ICpAaBinderInterface] then play.
-     * Focus code matches the BT binder's `requestBtAudioFocus` slot (0xf); play is
-     * [TX_CPAA_PLAY].
+     * SWI68/165: request audio focus on [ICpAaBinderInterface] then play (BT-shaped txn 0xf).
+     * A9 / eh32 (`Media_eh32_ll`): that package is absent — claim via [SaicCarAudioSource]
+     * (`AudioFocus` + `key_car_source_type=70`), which is how stock media tags BT/USB too.
      *
      * @return true when focus reached the service, or when the source already reads as AA.
      */
     fun switchToAndroidAuto(): Boolean {
         val binder = projection.binder()
-        if (binder == null) {
-            AppLogger.i(TAG, "switchToAndroidAuto: CPAA player not bound")
+        if (binder != null) {
+            val focusOk = SaicAidl.callVoid(binder, DESC_CPAA, TX_CPAA_REQUEST_AUDIO_FOCUS)
+            val playOk = SaicAidl.callBoolean(binder, DESC_CPAA, TX_CPAA_PLAY) ?: false
+            val source = currentSource()
+            AppLogger.i(
+                TAG,
+                "switchToAndroidAuto: requestAaAudioFocus=$focusOk play=$playOk " +
+                    "source=$source (${sourceName(source)})",
+            )
+            if (focusOk || source == SRC_AA) return true
+        } else {
+            AppLogger.i(TAG, "switchToAndroidAuto: CPAA player not bound — trying eh32 AudioFocus path")
+        }
+        val ctx = appContext
+        if (ctx == null) {
+            AppLogger.i(TAG, "switchToAndroidAuto: no context for car-source AudioFocus")
             return false
         }
-        val focusOk = SaicAidl.callVoid(binder, DESC_CPAA, TX_CPAA_REQUEST_AUDIO_FOCUS)
-        val playOk = SaicAidl.callBoolean(binder, DESC_CPAA, TX_CPAA_PLAY) ?: false
-        val source = currentSource()
-        AppLogger.i(
-            TAG,
-            "switchToAndroidAuto: requestAaAudioFocus=$focusOk play=$playOk " +
-                "source=$source (${sourceName(source)})",
+        // Wake RemoteUI's AA media browser session so SystemUI's mAAController has a token.
+        remoteUi.connect(ctx)
+        val launchOk = SaicAidl.callInt(
+            remoteUi.binder(),
+            DESC_RUI,
+            TX_RUI_LAUNCH_APP,
+            RUI_APP_MUSIC,
+            RUI_TYPE_ANDROID_AUTO,
         )
-        return focusOk || source == SRC_AA
+        AppLogger.i(TAG, "switchToAndroidAuto: RemoteUI launchAAMusic=$launchOk")
+        return SaicCarAudioSource.claimAndroidAuto(ctx)
+    }
+
+    /** True when SAIC MediaService or eh32 AudioFocus reports Android Auto as current. */
+    fun isAndroidAutoSource(): Boolean {
+        val source = currentSource()
+        if (source == SRC_AA) return true
+        if (source >= 0) return false
+        return SaicCarAudioSource.isAndroidAuto(appContext)
     }
 
     fun next(): Boolean = command(Command.NEXT)

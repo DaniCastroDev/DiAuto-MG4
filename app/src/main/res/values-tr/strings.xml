@@ -457,8 +457,8 @@
     <string name="show_navigation_notifications">Navigasyon bildirimleri</string>
     <string name="show_navigation_notifications_description">Bildirimlerde \"X metre sonra Y yap\" ve mevcut caddeyi göster (hata ayıklama için)</string>
     <string name="media_session_aa_status_placeholder">Bağlı</string>
-    <string name="sync_media_session_aa_metadata">AA çalıyor bilgisi medya oturumunda</string>
-    <string name="sync_media_session_aa_metadata_description">Telefondan gelen parça adı, sanatçı, süre ve albüm kapağını sistem medya oturumunda ve bildiriminde göster</string>
+    <string name="sync_media_session_aa_metadata">Android Auto medya yayını</string>
+    <string name="sync_media_session_aa_metadata_description">Allgo gibi: parça adı, sanatçı, süre ve kapak Android Auto medya oturumunda yayınlanır; araç ekranında AA kaynağı görünür. Varsayılan açık.</string>
     <string name="nav_notification_channel_name">Navigasyon</string>
     <string name="nav_notification_channel_description">Android Auto\'dan adım adım navigasyon güncellemeleri</string>
     <string name="nav_notification_title_format">%1$d m içinde — %2$s</string>

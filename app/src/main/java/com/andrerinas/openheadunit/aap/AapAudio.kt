@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import com.evsuite.hardware.saic.SaicCarAudioSource
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +23,13 @@ internal class AapAudio(
         private val audioManager: AudioManager,
         private val settings: Settings,
         private val context: Context) {
+
+    /**
+     * MEDIA focus must be attributed to AllGo AA on eh32 so SystemUI's media card
+     * leaves radio; notification/voice keep the process [audioManager].
+     */
+    private val mediaAudioManager: AudioManager =
+        SaicCarAudioSource.audioManager(context) ?: audioManager
 
     private val staticAudioFocus = settings.staticAudioFocus
     // Hybrid Bluetooth music: keep assistant/nav off STREAM_MUSIC so Gemini is not lost under A2DP.
@@ -168,7 +176,10 @@ internal class AapAudio(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { // API 26+
             if (focusRequest == Control.AudioFocusRequestNotification.AudioFocusRequestType.RELEASE_VALUE) {
                 AppLog.i("Releasing audio focus")
-                audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+                audioFocusRequest?.let {
+                    runCatching { mediaAudioManager.abandonAudioFocusRequest(it) }
+                    runCatching { audioManager.abandonAudioFocusRequest(it) }
+                }
                 audioFocusRequest = null
                 result = AudioManager.AUDIOFOCUS_REQUEST_GRANTED
             } else {
@@ -178,18 +189,25 @@ internal class AapAudio(
                     else -> AudioAttributes.USAGE_MEDIA
                 }
 
-                val audioAttributes = AudioAttributes.Builder()
+                val audioAttributes = if (usage == AudioAttributes.USAGE_MEDIA) {
+                    // Tag MEDIA focus as AA (70) so MG4 eh32 amp leaves radio/BT for Wi‑Fi PCM.
+                    SaicCarAudioSource.mediaAttributes()
+                } else {
+                    AudioAttributes.Builder()
                         .setUsage(usage)
-                        .setContentType(if (usage == AudioAttributes.USAGE_MEDIA) AudioAttributes.CONTENT_TYPE_MUSIC else AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
+                }
 
+                val focusAm =
+                    if (usage == AudioAttributes.USAGE_MEDIA) mediaAudioManager else audioManager
                 audioFocusRequest = AudioFocusRequest.Builder(focusRequest)
                         .setAudioAttributes(audioAttributes)
                         .setWillPauseWhenDucked(false)
                         .setOnAudioFocusChangeListener(callback)
                         .build()
                 
-                result = audioManager.requestAudioFocus(audioFocusRequest!!)
+                result = focusAm.requestAudioFocus(audioFocusRequest!!)
                 AppLog.i("Audio focus request result: ${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED ($result)"}")
             }
         } else { // API < 26
@@ -203,15 +221,15 @@ internal class AapAudio(
                 }
                 Control.AudioFocusRequestNotification.AudioFocusRequestType.GAIN_VALUE -> {
                     legacyFocusListener = callback
-                    audioManager.requestAudioFocus(callback, stream, AudioManager.AUDIOFOCUS_GAIN)
+                    mediaAudioManager.requestAudioFocus(callback, stream, AudioManager.AUDIOFOCUS_GAIN)
                 }
                 Control.AudioFocusRequestNotification.AudioFocusRequestType.GAIN_TRANSIENT_VALUE -> {
                     legacyFocusListener = callback
-                    audioManager.requestAudioFocus(callback, stream, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                    mediaAudioManager.requestAudioFocus(callback, stream, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                 }
                 Control.AudioFocusRequestNotification.AudioFocusRequestType.GAIN_TRANSIENT_MAY_DUCK_VALUE -> {
                     legacyFocusListener = callback
-                    audioManager.requestAudioFocus(callback, stream, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    mediaAudioManager.requestAudioFocus(callback, stream, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
                 }
                 else -> AudioManager.AUDIOFOCUS_REQUEST_FAILED
             }
@@ -222,25 +240,20 @@ internal class AapAudio(
 
     private fun requestPlaybackFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val audioAttributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build()
-
             val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                    .setAudioAttributes(audioAttributes)
+                    .setAudioAttributes(SaicCarAudioSource.mediaAttributes())
                     .setWillPauseWhenDucked(false)
                     .setOnAudioFocusChangeListener(playbackFocusListener)
                     .build()
             playbackFocusRequest = request
             
-            val result = audioManager.requestAudioFocus(request)
+            val result = mediaAudioManager.requestAudioFocus(request)
             AppLog.i("AapAudio: Playback transient focus request result: ${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED ($result)"}")
         } else {
             @Suppress("DEPRECATION")
             legacyPlaybackFocusListener = playbackFocusListener
             @Suppress("DEPRECATION")
-            val result = audioManager.requestAudioFocus(playbackFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            val result = mediaAudioManager.requestAudioFocus(playbackFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             AppLog.i("AapAudio: Playback transient focus request result (legacy): ${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED"}")
         }
     }
@@ -249,14 +262,14 @@ internal class AapAudio(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             playbackFocusRequest?.let { 
                 AppLog.i("AapAudio: Releasing playback transient audio focus")
-                audioManager.abandonAudioFocusRequest(it) 
+                mediaAudioManager.abandonAudioFocusRequest(it) 
             }
             playbackFocusRequest = null
         } else {
             @Suppress("DEPRECATION")
             legacyPlaybackFocusListener?.let { 
                 AppLog.i("AapAudio: Releasing playback transient audio focus (legacy)")
-                audioManager.abandonAudioFocus(it) 
+                mediaAudioManager.abandonAudioFocus(it) 
             }
             legacyPlaybackFocusListener = null
         }
@@ -314,16 +327,16 @@ internal class AapAudio(
         selfDefeatingStops = 0
         selfDefeatingLatched = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            audioFocusRequest?.let { mediaAudioManager.abandonAudioFocusRequest(it) }
             audioFocusRequest = null
-            playbackFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            playbackFocusRequest?.let { mediaAudioManager.abandonAudioFocusRequest(it) }
             playbackFocusRequest = null
         } else {
             @Suppress("DEPRECATION")
-            legacyFocusListener?.let { audioManager.abandonAudioFocus(it) }
+            legacyFocusListener?.let { mediaAudioManager.abandonAudioFocus(it) }
             legacyFocusListener = null
             @Suppress("DEPRECATION")
-            legacyPlaybackFocusListener?.let { audioManager.abandonAudioFocus(it) }
+            legacyPlaybackFocusListener?.let { mediaAudioManager.abandonAudioFocus(it) }
             legacyPlaybackFocusListener = null
         }
     }
