@@ -8,6 +8,7 @@
     <string name="da_open">Ouvrir Android Auto</string>
     <string name="da_ready">Prêt quand vous l’êtes</string>
     <string name="da_connecting">Connexion au téléphone…</string>
+    <string name="da_waiting_after_disconnect">Préparation de la reconnexion… %1$ds</string>
     <string name="da_connected">Android Auto est connecté</string>
     <string name="da_hint">Appariez votre téléphone dans les réglages Bluetooth de la voiture, puis choisissez Connecter le téléphone. Gardez Bluetooth et Wi‑Fi activés.</string>
     <string name="da_wireless">ANDROID AUTO SANS FIL</string>

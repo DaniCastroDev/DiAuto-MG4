@@ -302,6 +302,9 @@ class AapService : Service(), UsbReceiver.Listener {
     private var userExitedAA = false
     @Volatile private var userExitCooldownUntil = 0L
 
+    /** In-flight poke that may be waiting out [USER_EXIT_COOLDOWN_MS]. */
+    private var nativeAaPokeJob: Job? = null
+
     /**
      * Automatic reconnect / discovery restarts after unexpected disconnects.
      * Reset on a successful handshake so a later mid-drive drop can retry again.
@@ -2094,31 +2097,7 @@ class AapService : Service(), UsbReceiver.Listener {
                 val mac = intent?.getStringExtra(EXTRA_MAC)
                 if (mac != null) {
                     AppLog.i("AapService: Received manual Native-AA poke request for $mac")
-                    // [FIX] Reset exit flags so the subsequent connection is accepted
-                    userExitedAA = false
-                    userExitCooldownUntil = 0L
-
-                    val settings = App.provide(this).settings
-                    if (activeWifiMode != 3 || settings.wifiConnectionMode != 3) {
-                        AppLog.i("AapService: Initializing Native AA mode before poke...")
-                        initWifiMode(force = true)
-                    } else if (nativeAaHandshakeManager?.isActive() != true) {
-                        // A completed handoff closes the AA listeners while leaving the manager
-                        // running, and start() returns immediately on isRunning - so calling it here
-                        // reopened nothing. The poke then woke the phone, the phone opened RFCOMM,
-                        // and nothing was listening: the button appeared to do nothing however many
-                        // times it was pressed. A full re-init is what reopens them, which is what
-                        // the Bluetooth auto-start path below already does for the same reason.
-                        AppLog.i("AapService: Native AA listeners are closed — re-arming before the poke.")
-                        initWifiMode(force = true)
-                    } else {
-                        AppLog.d("AapService: Already in Native AA mode, skipping re-init.")
-                        // Just ensure servers are running if they were stopped for some reason
-                        startWirelessServer()
-                        nativeAaHandshakeManager?.start()
-                    }
-
-                    nativeAaHandshakeManager?.manualPoke(mac)
+                    scheduleNativeAaPoke(mac, reason = "manual poke")
                 }
             }
             ACTION_BT_AUTO_START          -> {
@@ -2148,19 +2127,11 @@ class AapService : Service(), UsbReceiver.Listener {
                         AppLog.i("AapService: Bluetooth auto-start — switching wifi mode to Native AA")
                         settings.wifiConnectionMode = 3
                     }
-                    userExitedAA = false
-                    userExitCooldownUntil = 0L
-                    val needsArm =
-                        activeWifiMode != 3 ||
-                            (nativeAaHandshakeManager?.isActive() != true &&
-                                nativeAaHandshakeManager?.isAttemptInFlight() != true)
-                    if (needsArm) {
-                        AppLog.i("AapService: Bluetooth auto-start — arming Native AA handshake.")
-                        initWifiMode(force = true)
-                    }
                     if (!mac.isNullOrEmpty()) {
                         AppLog.i("AapService: Bluetooth auto-start — poking $mac")
-                        nativeAaHandshakeManager?.manualPoke(mac)
+                        scheduleNativeAaPoke(mac, reason = "bt auto-start")
+                    } else {
+                        scheduleNativeAaArm(reason = "bt auto-start")
                     }
                 }
             }
@@ -2173,6 +2144,10 @@ class AapService : Service(), UsbReceiver.Listener {
             }
             ACTION_DISCONNECT            -> {
                 AppLog.i("Disconnect action received.")
+                // Cancel any pending post-disconnect wait/poke so pill cancel
+                // does not keep reconnecting after the user backed out.
+                nativeAaPokeJob?.cancel()
+                nativeAaPokeJob = null
                 // disconnect() has its own early-return when already Disconnected,
                 // and unlike the previous isConnected guard it also covers the
                 // Connecting state, so the UI cancel paths work before handshake
@@ -3753,6 +3728,72 @@ class AapService : Service(), UsbReceiver.Listener {
     // Companion
     // -------------------------------------------------------------------------
 
+    /**
+     * Waits out a user-exit cooldown (if any), then arms Native AA and pokes [mac].
+     * The home-screen pill shows a countdown so the user does not need to know about the gap.
+     */
+    private fun scheduleNativeAaPoke(mac: String, reason: String) {
+        nativeAaPokeJob?.cancel()
+        nativeAaPokeJob = serviceScope.launch {
+            awaitUserExitCooldown(reason)
+            armNativeAaForPoke()
+            AppLog.i("AapService: $reason — poking $mac")
+            nativeAaHandshakeManager?.manualPoke(mac)
+        }
+    }
+
+    private fun scheduleNativeAaArm(reason: String) {
+        nativeAaPokeJob?.cancel()
+        nativeAaPokeJob = serviceScope.launch {
+            awaitUserExitCooldown(reason)
+            armNativeAaForPoke()
+        }
+    }
+
+    private suspend fun awaitUserExitCooldown(reason: String) {
+        while (true) {
+            val remaining = userExitCooldownUntil - android.os.SystemClock.elapsedRealtime()
+            if (remaining <= 0L) break
+            val secs = ((remaining + 999L) / 1000L).toInt().coerceAtLeast(1)
+            AppLog.i("AapService: $reason waiting ${remaining}ms after disconnect ($secs s left)")
+            publishAutoConnectStatus(getString(R.string.da_waiting_after_disconnect, secs))
+            delay(minOf(1_000L, remaining))
+        }
+        userExitedAA = false
+        userExitCooldownUntil = 0L
+        publishAutoConnectStatus(getString(R.string.da_connecting))
+    }
+
+    private fun armNativeAaForPoke() {
+        val settings = App.provide(this).settings
+        if (activeWifiMode != 3 || settings.wifiConnectionMode != 3) {
+            AppLog.i("AapService: Initializing Native AA mode before poke...")
+            initWifiMode(force = true)
+        } else if (nativeAaHandshakeManager?.isActive() != true) {
+            // A completed handoff closes the AA listeners while leaving the manager
+            // running, and start() returns immediately on isRunning - so calling it here
+            // reopened nothing. The poke then woke the phone, the phone opened RFCOMM,
+            // and nothing was listening: the button appeared to do nothing however many
+            // times it was pressed. A full re-init is what reopens them, which is what
+            // the Bluetooth auto-start path already does for the same reason.
+            AppLog.i("AapService: Native AA listeners are closed — re-arming before the poke.")
+            initWifiMode(force = true)
+        } else {
+            AppLog.d("AapService: Already in Native AA mode, skipping re-init.")
+            startWirelessServer()
+            nativeAaHandshakeManager?.start()
+        }
+    }
+
+    private fun publishAutoConnectStatus(text: String) {
+        com.andrerinas.openheadunit.main.MainActivity.autoConnectStatusText = text
+        sendBroadcast(Intent(ACTION_AUTO_CONNECT_STATUS).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_AUTO_CONNECT_STATUS, text)
+        })
+    }
+
+
     companion object {
         /** Bind attempts before the wireless server gives up and reports the port unusable. */
         private const val BIND_ATTEMPTS = 3
@@ -3789,6 +3830,9 @@ class AapService : Service(), UsbReceiver.Listener {
         const val ACTION_START_WIRELESS_SCAN       = "com.andrerinas.openheadunit.ACTION_START_WIRELESS_SCAN"
         const val ACTION_STOP_WIRELESS             = "com.andrerinas.openheadunit.ACTION_STOP_WIRELESS"
         const val ACTION_NATIVE_AA_POKE            = "com.andrerinas.openheadunit.ACTION_NATIVE_AA_POKE"
+        /** Pill/overlay status text while waiting out the post-disconnect cooldown. */
+        const val ACTION_AUTO_CONNECT_STATUS       = "com.andrerinas.openheadunit.ACTION_AUTO_CONNECT_STATUS"
+        const val EXTRA_AUTO_CONNECT_STATUS        = "auto_connect_status"
         const val ACTION_NEARBY_CONNECT             = "com.andrerinas.openheadunit.ACTION_NEARBY_CONNECT"
         const val ACTION_CHECK_USB                 = "com.andrerinas.openheadunit.ACTION_CHECK_USB"
         const val ACTION_STOP_SERVICE              = "com.andrerinas.openheadunit.aap.action.STOP_SERVICE"

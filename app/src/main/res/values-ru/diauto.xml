@@ -8,6 +8,7 @@
     <string name="da_open">Открыть Android Auto</string>
     <string name="da_ready">Готово, когда будете готовы</string>
     <string name="da_connecting">Подключение к телефону…</string>
+    <string name="da_waiting_after_disconnect">Подготовка к переподключению… %1$ds</string>
     <string name="da_connected">Android Auto подключён</string>
     <string name="da_hint">Выполните сопряжение телефона в настройках Bluetooth автомобиля, затем нажмите «Подключить телефон». Оставьте Bluetooth и Wi-Fi включёнными.</string>
     <string name="da_wireless">БЕСПРОВОДНОЙ ANDROID AUTO</string>

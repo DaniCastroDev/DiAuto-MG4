@@ -8,6 +8,7 @@
     <string name="da_open">打开 Android Auto</string>
     <string name="da_ready">随时准备就绪</string>
     <string name="da_connecting">正在连接手机…</string>
+    <string name="da_waiting_after_disconnect">正在准备重新连接… %1$ds</string>
     <string name="da_connected">Android Auto 已连接</string>
     <string name="da_hint">在车辆蓝牙设置中与手机配对，然后选择连接手机。保持蓝牙和 Wi-Fi 开启。</string>
     <string name="da_wireless">无线 ANDROID AUTO</string>

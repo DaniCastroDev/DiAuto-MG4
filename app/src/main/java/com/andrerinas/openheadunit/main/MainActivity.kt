@@ -101,6 +101,17 @@ class MainActivity : BaseActivity() {
         }
     }
 
+    private var isAutoConnectStatusReceiverRegistered = false
+
+    private val autoConnectStatusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != AapService.ACTION_AUTO_CONNECT_STATUS) return
+            val text = intent.getStringExtra(AapService.EXTRA_AUTO_CONNECT_STATUS) ?: return
+            autoConnectStatusText = text
+            applyAutoConnectStatusText(text)
+        }
+    }
+
     override fun attachBaseContext(newBase: Context) {
         val settings  = Settings(newBase)
         val scale = settings.uiScaleHomePercent / 100.0f
@@ -228,6 +239,13 @@ class MainActivity : BaseActivity() {
         )
         isRecreateReceiverRegistered = true
 
+        ContextCompat.registerReceiver(
+            this, autoConnectStatusReceiver,
+            android.content.IntentFilter(AapService.ACTION_AUTO_CONNECT_STATUS),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        isAutoConnectStatusReceiverRegistered = true
+
         // USB auto-attach is the one auto-connect path that pre-launches MainActivity
         // before any state transition occurs. HomeFragment-driven auto-connects will
         // call beginAutoConnect() directly from their entry points.
@@ -312,8 +330,13 @@ class MainActivity : BaseActivity() {
         if (!autoConnectInProgress) return
         AppLog.i("Auto-connect: cancelled by user")
         // End UI first so the Disconnected observer cannot toast a user cancel
-        // as a failed connection, then tear down the in-flight attempt.
+        // as a failed connection, then tear down the in-flight attempt —
+        // including any post-disconnect wait/poke still queued in AapService.
         endAutoConnect(success = false, notifyFailure = false)
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, AapService::class.java).setAction(AapService.ACTION_DISCONNECT),
+        )
         App.provide(this).commManager.disconnect()
     }
 
@@ -419,8 +442,9 @@ class MainActivity : BaseActivity() {
         }
 
         val pill = findViewById<View>(R.id.auto_connect_pill) ?: return
-        val pillText = findViewById<android.widget.TextView>(R.id.auto_connect_pill_text)
-        pillText?.text = autoConnectStatusText ?: getString(R.string.android_auto_starting)
+        applyAutoConnectStatusText(
+            autoConnectStatusText ?: getString(R.string.android_auto_starting),
+        )
         if (pill.visibility == View.VISIBLE) return
 
         pill.visibility = View.VISIBLE
@@ -428,6 +452,13 @@ class MainActivity : BaseActivity() {
         // Suppress the launch splash if it is still up so the pill is visible
         // immediately on auto-connect from a cold start.
         findViewById<View>(R.id.splash_overlay)?.visibility = View.GONE
+    }
+
+    /** Updates pill and overlay labels while an auto-connect attempt is visible. */
+    private fun applyAutoConnectStatusText(text: String) {
+        findViewById<android.widget.TextView>(R.id.auto_connect_pill_text)?.text = text
+        findViewById<android.widget.TextView>(R.id.auto_connect_loading_default_text)?.text = text
+        findViewById<android.widget.TextView>(R.id.auto_connect_loading_custom_text)?.text = text
     }
 
     private fun hideAutoConnectPill() {
@@ -993,6 +1024,10 @@ class MainActivity : BaseActivity() {
         if (isRecreateReceiverRegistered) {
             unregisterReceiver(recreateReceiver)
             isRecreateReceiverRegistered = false
+        }
+        if (isAutoConnectStatusReceiverRegistered) {
+            unregisterReceiver(autoConnectStatusReceiver)
+            isAutoConnectStatusReceiverRegistered = false
         }
         if (isFinishing) {
             AppLog.i("MainActivity finishing, resetting auto-start flag.")

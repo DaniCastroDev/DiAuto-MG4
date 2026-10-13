@@ -14,6 +14,7 @@
     <string name="da_open">Open Android Auto</string>
     <string name="da_ready">Ready when you are</string>
     <string name="da_connecting">Connecting to your phone…</string>
+    <string name="da_waiting_after_disconnect">Preparing reconnect… %1$ds</string>
     <string name="da_connected">Android Auto is connected</string>
     <string name="da_hint">Pair your phone in the car’s Bluetooth settings, then choose Connect phone. Keep Bluetooth and Wi-Fi on.</string>
     <string name="da_wireless">WIRELESS ANDROID AUTO</string>

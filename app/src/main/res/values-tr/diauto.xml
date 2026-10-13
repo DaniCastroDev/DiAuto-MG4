@@ -8,6 +8,7 @@
     <string name="da_open">Android Auto’yu aç</string>
     <string name="da_ready">Hazır olduğunda bağlan</string>
     <string name="da_connecting">Telefonuna bağlanıyor…</string>
+    <string name="da_waiting_after_disconnect">Yeniden bağlanmaya hazırlanıyor… %1$ds</string>
     <string name="da_connected">Android Auto bağlı</string>
     <string name="da_hint">Önce aracın Bluetooth ayarlarından telefonunu eşleştir, sonra Telefonu bağla’yı seç. Bluetooth ve Wi‑Fi açık kalsın.</string>
     <string name="da_wireless">KABLOSUZ ANDROID AUTO</string>
