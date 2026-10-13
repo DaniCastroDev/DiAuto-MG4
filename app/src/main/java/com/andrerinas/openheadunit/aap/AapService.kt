@@ -78,6 +78,7 @@ import android.annotation.SuppressLint
 import com.andrerinas.openheadunit.utils.Settings
 import com.andrerinas.openheadunit.utils.protoUint32ToLong
 import com.evsuite.hardware.saic.SaicMediaPlayer
+import com.evsuite.hardware.saic.SaicRadio
 import java.net.ServerSocket
 
 /**
@@ -1114,7 +1115,7 @@ class AapService : Service(), UsbReceiver.Listener {
                 val state = BluetoothHelper.a2dpMediaLinkState(this@AapService)
                 if (!HybridMusicPolicy.needsReleaseBluetoothMediaLink(false, state)) {
                     AppLog.i("AapService: Wi‑Fi media A2DP already down (attempt $attempt)")
-                    return@launch
+                    break
                 }
                 val asked = BluetoothHelper.releaseCarBluetoothMediaLink(
                     this@AapService,
@@ -1126,6 +1127,63 @@ class AapService : Service(), UsbReceiver.Listener {
                 )
                 delay(3_000L)
             }
+            // Radio keeps SAIC amp priority even while DiAuto decodes Wi‑Fi PCM. Pause the
+            // tuner, claim the Allgo-style AA media source (SRC_AA), then re-take Android
+            // focus now that A2DP is gone (AUTO skipped it earlier).
+            silenceSaicRadioForWifiAudio()
+            claimSaicAndroidAutoMediaSource()
+            commManager.reclaimPlaybackFocusIfNeeded()
+        }
+    }
+
+    /**
+     * Ask SAIC MediaService to select Android Auto as the current source — same CPAA path
+     * Allgo uses so the car screen/amp know music is an AA publication, not leftover radio.
+     */
+    private suspend fun claimSaicAndroidAutoMediaSource() {
+        try {
+            SaicMediaPlayer.connectProjection(this)
+            repeat(12) { attempt ->
+                if (SaicMediaPlayer.switchToAndroidAuto()) {
+                    AppLog.i(
+                        "AapService: car media source switched to Android Auto " +
+                            "(attempt ${attempt + 1})",
+                    )
+                    updateMediaSessionState(true)
+                    return
+                }
+                delay(250)
+            }
+            AppLog.w("AapService: could not switch car to AA media source (CPAA not ready)")
+        } catch (e: Exception) {
+            AppLog.w("AapService: AA media source switch failed: ${e.message}")
+        }
+    }
+
+    /**
+     * MG4 amp follows the SAIC media source. While radio is playing, Wi‑Fi AA AudioTrack
+     * does not become the audible source — [SaicRadio.pause] is the launcher's mute path.
+     */
+    private suspend fun silenceSaicRadioForWifiAudio() {
+        try {
+            SaicRadio.connect(this)
+            repeat(8) { attempt ->
+                val playing = SaicRadio.isPlaying()
+                if (playing == false) {
+                    AppLog.i("AapService: SAIC radio already paused (attempt ${attempt + 1})")
+                    return
+                }
+                val ok = SaicRadio.pause()
+                AppLog.i(
+                    "AapService: pause SAIC radio for Wi‑Fi AA audio " +
+                        "attempt=${attempt + 1} ok=$ok playingWas=$playing",
+                )
+                if (ok) return
+                delay(250)
+            }
+            AppLog.w("AapService: could not pause SAIC radio (service not ready)")
+        } catch (e: Exception) {
+            AppLog.w("AapService: pause SAIC radio failed: ${e.message}")
         }
     }
 

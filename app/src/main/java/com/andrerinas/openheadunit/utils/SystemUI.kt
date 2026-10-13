@@ -186,7 +186,7 @@ object SystemUI {
                     typeMask = WindowInsetsCompat.Type.navigationBars()
                 }
                 Settings.FullscreenMode.NAV_ONLY -> {
-                    // Left hidden on purpose — pad only for the remaining top / status bar.
+                    // Left hidden on purpose — pad for the remaining top / status bar.
                     typeMask = WindowInsetsCompat.Type.statusBars()
                 }
                 else -> {
@@ -207,8 +207,15 @@ object SystemUI {
                 androidx.core.graphics.Insets.NONE
             }
 
-            v.setPadding(bars.left + manualL, bars.top + manualT, bars.right + manualR, bars.bottom + manualB)
-            HeadUnitScreenConfig.updateInsets(bars.left + manualL, bars.top + manualT, bars.right + manualR, bars.bottom + manualB)
+            // MG4 OEM top strip (~80px): statusBars() often under-reports. When the top bar
+            // stays visible (hide-left-only), size AA to ~1920×(1080−80).
+            val top = maxOf(
+                bars.top,
+                OemDisplayChrome.topBarReservePx(mode == Settings.FullscreenMode.NAV_ONLY)
+            )
+
+            v.setPadding(bars.left + manualL, top + manualT, bars.right + manualR, bars.bottom + manualB)
+            HeadUnitScreenConfig.updateInsets(bars.left + manualL, top + manualT, bars.right + manualR, bars.bottom + manualB)
 
             onInsetsChanged?.invoke()
             WindowInsetsCompat.CONSUMED

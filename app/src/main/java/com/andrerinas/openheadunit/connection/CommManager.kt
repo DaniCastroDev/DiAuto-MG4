@@ -803,6 +803,11 @@ class CommManager(
         _transport?.aapAudio?.restartAudio()
     }
 
+    /** After Wi‑Fi AA drops A2DP, re-take system focus if media was already playing. */
+    fun reclaimPlaybackFocusIfNeeded() {
+        _transport?.aapAudio?.reclaimPlaybackFocusIfNeeded()
+    }
+
     // -----------------------------------------------------------------------------------------
     // Disconnect
     // -----------------------------------------------------------------------------------------

@@ -109,6 +109,11 @@ object SaicMediaPlayer {
     private const val TX_CPAA_PAUSE = 2
     private const val TX_CPAA_PREVIOUS = 3
     private const val TX_CPAA_NEXT = 4
+    /**
+     * Same ordinal slot as [TX_BT_REQUEST_AUDIO_FOCUS] on the BT binder — Allgo/SAIC CPAA
+     * player takes amp ownership here so the car UI shows Android Auto music, not radio.
+     */
+    private const val TX_CPAA_REQUEST_AUDIO_FOCUS = 0xf
 
     private const val TX_GENERIC_PLAY = 2
     private const val TX_GENERIC_PAUSE = 3
@@ -196,6 +201,45 @@ object SaicMediaPlayer {
         val playOk = SaicAidl.callBoolean(binder, DESC_BT, TX_BT_PLAY) ?: false
         AppLogger.i(TAG, "switchToBluetooth: requestBtAudioFocus=$focusOk play=$playOk")
         return focusOk
+    }
+
+    /**
+     * Binds the CPAA (CarPlay / Android Auto) player — enough for [switchToAndroidAuto].
+     */
+    fun connectProjection(context: Context) {
+        appContext = context.applicationContext
+        projection.connect(context)
+        status.connect(context)
+    }
+
+    val isProjectionReady: Boolean get() = projection.isReady
+
+    /**
+     * Makes the car's media source Android Auto (`SRC_AA` / 0x46), the same handoff Allgo uses
+     * so the launcher music card and amp know AA is publishing — not radio sitting on top of
+     * a silent Wi‑Fi PCM stream.
+     *
+     * Mirrors [switchToBluetooth]: request audio focus on [ICpAaBinderInterface] then play.
+     * Focus code matches the BT binder's `requestBtAudioFocus` slot (0xf); play is
+     * [TX_CPAA_PLAY].
+     *
+     * @return true when focus reached the service, or when the source already reads as AA.
+     */
+    fun switchToAndroidAuto(): Boolean {
+        val binder = projection.binder()
+        if (binder == null) {
+            AppLogger.i(TAG, "switchToAndroidAuto: CPAA player not bound")
+            return false
+        }
+        val focusOk = SaicAidl.callVoid(binder, DESC_CPAA, TX_CPAA_REQUEST_AUDIO_FOCUS)
+        val playOk = SaicAidl.callBoolean(binder, DESC_CPAA, TX_CPAA_PLAY) ?: false
+        val source = currentSource()
+        AppLogger.i(
+            TAG,
+            "switchToAndroidAuto: requestAaAudioFocus=$focusOk play=$playOk " +
+                "source=$source (${sourceName(source)})",
+        )
+        return focusOk || source == SRC_AA
     }
 
     fun next(): Boolean = command(Command.NEXT)

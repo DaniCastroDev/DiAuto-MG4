@@ -153,8 +153,12 @@ object HeadUnitScreenConfig {
 
         // Initial Insets: For non-immersive, the bars are already baked into the anchor (realSize = 736),
         // so we start with 0 system insets and just add manual settings.
+        // Seed MG4 OEM top chrome (~80px) early for hide-left-only so the first AA handshake
+        // already uses ~1920×1000 (avoids a mid-session glitch when insets arrive late).
         systemInsetLeft = settings.insetLeft
-        systemInsetTop = settings.insetTop
+        systemInsetTop = settings.insetTop + OemDisplayChrome.topBarReservePx(
+            settings.fullscreenMode == Settings.FullscreenMode.NAV_ONLY
+        )
         systemInsetRight = settings.insetRight
         systemInsetBottom = settings.insetBottom
         

@@ -262,6 +262,48 @@ internal class AapAudio(
         }
     }
 
+    /**
+     * Native AA keeps A2DP up through bootstrap, so the first media channel often starts while
+     * [PlaybackFocusPolicy.Mode.AUTO] correctly skips focus (to avoid AVRCP-pausing the phone).
+     * After the Wi‑Fi media path drops A2DP, call this so the car radio does not keep the amp
+     * for the rest of the session.
+     */
+    fun reclaimPlaybackFocusIfNeeded() {
+        if (staticAudioFocus || !enableAudioSink) return
+        if (holdingPlaybackFocus) return
+        val channel = synchronized(activeAudioChannels) {
+            when {
+                activeAudioChannels.isEmpty() -> return
+                Channel.ID_AUD in activeAudioChannels -> Channel.ID_AUD
+                else -> activeAudioChannels.first()
+            }
+        }
+        val btMediaLinkActive = BluetoothHelper.isA2dpMediaLinkActive(context)
+        val mode = playbackFocusModeForChannel(channel)
+        val acquire = PlaybackFocusPolicy.shouldAcquire(
+            mode = mode,
+            staticAudioFocus = staticAudioFocus,
+            audioSinkEnabled = enableAudioSink,
+            isAudioChannel = true,
+            btMediaLinkActive = btMediaLinkActive,
+            selfDefeatingLatched = selfDefeatingLatched,
+        )
+        if (!acquire) {
+            AppLog.i(
+                "AapAudio: reclaim skipped after BT media release " +
+                    "(mode=$mode, bluetoothMedia=$btMediaLinkActive, latched=$selfDefeatingLatched)",
+            )
+            return
+        }
+        AppLog.i(
+            "AapAudio: reclaiming transient system audio focus after BT media release " +
+                "(${Channel.name(channel)}, mode=$mode)",
+        )
+        focusAcquiredAtMs = SystemClock.elapsedRealtime()
+        holdingPlaybackFocus = true
+        requestPlaybackFocus()
+    }
+
     fun releaseAllFocus() {
         AppLog.i("AapAudio: Releasing all audio focus.")
         synchronized(activeAudioChannels) { activeAudioChannels.clear() }
