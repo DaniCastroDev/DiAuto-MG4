@@ -74,10 +74,11 @@ class Settings(private val context: Context) {
         get() = prefs.getInt("resolutionId", Resolution._1920x1080.id)
         set(value) = prefs.edit().putInt("resolutionId", value).apply()
 
-    // Flag to determine if the projection should stretch and ignore aspect ratio to fill the screen
+    // Flag to determine if the projection should stretch and ignore aspect ratio to fill the screen.
+    // Key renamed so upgrades reset to off (letterbox) instead of keeping the old default-on.
     var stretchToFill: Boolean
-        get() = prefs.getBoolean("stretch_to_fill", true)
-        set(value) { prefs.edit().putBoolean("stretch_to_fill", value).apply() }
+        get() = prefs.getBoolean(KEY_STRETCH_TO_FILL, false)
+        set(value) { prefs.edit().putBoolean(KEY_STRETCH_TO_FILL, value).apply() }
 
     // Forced scale for older devices (SurfaceView fix)
     var forcedScale: Boolean
@@ -688,10 +689,10 @@ class Settings(private val context: Context) {
 
     /**
      * Hybrid: AA video over Wi‑Fi, music on car Bluetooth/A2DP (MEDIA sink omitted — Wi‑Fi
-     * media PCM stutters on MG4). Key renamed so upgrades drop the old DiLink5.1-only default.
+     * media PCM stutters on MG4). Key bumped again so upgrades reset to off (Wi‑Fi audio trial).
      */
     var musicViaBluetooth: Boolean
-        get() = prefs.getBoolean(KEY_MUSIC_VIA_BLUETOOTH, true)
+        get() = prefs.getBoolean(KEY_MUSIC_VIA_BLUETOOTH, false)
         set(value) { prefs.edit().putBoolean(KEY_MUSIC_VIA_BLUETOOTH, value).apply() }
 
     /**
@@ -1140,8 +1141,12 @@ class Settings(private val context: Context) {
         const val KEY_LOG_LEVEL = "log-level-v2"
         const val KEY_LOG_SOURCE = "log-source"
         const val KEY_LOG_LOCATION = "log-location"
-        // Was "music-via-bluetooth" (default only DiLink5.1). Renamed so upgrades start ON.
-        const val KEY_MUSIC_VIA_BLUETOOTH = "music-via-bluetooth-v2"
+        // Was music-via-bluetooth / v2 (default ON). v3 resets upgrades to OFF.
+        const val KEY_MUSIC_VIA_BLUETOOTH = "music-via-bluetooth-v3"
+        // Was stretch_to_fill (default ON). v2 resets upgrades to OFF.
+        const val KEY_STRETCH_TO_FILL = "stretch-to-fill-v2"
+        // Was auto-enable-hotspot (default OFF). v2 resets upgrades to ON.
+        const val KEY_AUTO_ENABLE_HOTSPOT = "auto-enable-hotspot-v2"
         const val KEY_FORCE_BT_MUSIC_ON_CONNECT = "force-bt-music-on-connect"
         const val KEY_MEDIA_AUDIO_BUFFER_MS = "media-audio-buffer-ms"
         /** Bumped key so upgrades pick AAC default on for Wi‑Fi audio trials. */
@@ -1564,8 +1569,9 @@ class Settings(private val context: Context) {
         set(value) { prefs.edit().putBoolean("kill-on-disconnect", value).apply() }
 
     var autoEnableHotspot: Boolean
-        get() = prefs.getBoolean("auto-enable-hotspot", false)
-        set(value) { prefs.edit().putBoolean("auto-enable-hotspot", value).apply() }
+        // Default on; key renamed so existing installs pick up the new default too.
+        get() = prefs.getBoolean(KEY_AUTO_ENABLE_HOTSPOT, true)
+        set(value) { prefs.edit().putBoolean(KEY_AUTO_ENABLE_HOTSPOT, value).apply() }
 
     var waitForWifiBeforeWifiDirect: Boolean
         get() = prefs.getBoolean("wait-for-wifi-before-wifi-direct", false)

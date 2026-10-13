@@ -279,8 +279,8 @@
     <string name="add_new">Yeni ekle</string>
     <string name="cancel">İptal</string>
     <string name="enable">Etkinleştir</string>
-    <string name="pref_stretch_screen_title">Ekranı doldurmak için uzat</string>
-    <string name="pref_stretch_screen_summary">Tüm ekranı doldurmak için en boy oranını yok sayar (siyah çubukları kaldırır)</string>
+    <string name="pref_stretch_screen_title">Görüntüyü esnet (oranı yok say)</string>
+    <string name="pref_stretch_screen_summary">Android Auto görüntüsünü ekrana yayar, siyah şeritleri kaldırır. Kapalıyken doğru en-boy oranı korunur.</string>
     <string name="forced_scale">Zorunlu Ölçekleme (Eski Düzeltme)</string>
     <string name="forced_scale_description">SurfaceView kullanan bazı eski cihazlardaki ölçekleme sorunlarını düzeltir. Sadece görüntü bozuk veya kaymış görünüyorsa kullanın.</string>
     <string name="hud_mirroring">HUD Modu (Yatay Çevirme)</string>
@@ -533,8 +533,8 @@
     <string name="vehicle_year_error_max">Yıl %1$d değerinden sonra olamaz</string>
     <string name="vehicle_info_restart_note">Bu veriler her bağlandığınızda Android Auto\'ya gönderilir.</string>
 
-    <string name="auto_enable_hotspot">Erişim Noktasını Otomatik Etkinleştir</string>
-    <string name="auto_enable_hotspot_description">Bu cihazda otomatik olarak bir Wi-Fi erişim noktası başlatır. (Her cihazda çalışmayabilir)</string>
+    <string name="auto_enable_hotspot">Araç erişim noktasını otomatik aç</string>
+    <string name="auto_enable_hotspot_description">Kablosuz Android Auto için DiAuto gerektiğinde araç Wi‑Fi erişim noktasını açar. MG4’te varsayılan açık.</string>
     <string name="hotspot_warning_title">Deneysel Özellik</string>
     <string name="hotspot_warning_message">Bu özellik yansıma (reflection) kullanır ve tüm cihazlarda çalışmayabilir. Ayrıca \"Sistem ayarlarını değiştir\" izninin manuel olarak verilmesini gerektirebilir.</string>
     <string name="hotspot_permission_title">İzin Gerekli</string>
@@ -1003,7 +1003,7 @@
     <string name="setup_open_car_hotspot_settings">Araç erişim noktası ayarlarını aç</string>
     <string name="setup_save_and_use_hotspot">Erişim noktası bilgilerini kaydet ve bu modu kullan</string>
     <string name="setup_hotspot_pending">Kurulumu bitir · Bu modu kullanmak için erişim noktası bilgilerini kaydet.</string>
-    <string name="setup_turn_hotspot_on_automatically">Erişim noktasını otomatik aç</string>
+    <string name="setup_turn_hotspot_on_automatically">Araç erişim noktasını otomatik aç</string>
     <string name="setup_auto_hotspot_hint">İsteğe bağlı. Sistem ayarlarını değiştirme izni ve uyumlu araç yazılımı gerekir. Erişim noktası kapalı kalırsa araç ayarlarından aç.</string>
     <string name="setup_allow_automatic_hotspot_control">Otomatik erişim noktası kontrolüne izin ver</string>
     <string name="setup_system_settings_access_allowed">Sistem ayarları erişimine izin verildi</string>

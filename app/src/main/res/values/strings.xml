@@ -467,8 +467,8 @@
     <string name="add_new">Add new</string>
     <string name="cancel">Cancel</string>
     <string name="enable">Enable</string>
-    <string name="pref_stretch_screen_title">Stretch to fill screen</string>
-    <string name="pref_stretch_screen_summary">Ignores aspect ratio to fill the entire display (removes black bars)</string>
+    <string name="pref_stretch_screen_title">Stretch video (ignore aspect)</string>
+    <string name="pref_stretch_screen_summary">Stretches the Android Auto picture to fill the screen and removes black bars. Off keeps the correct aspect ratio.</string>
     <string name="forced_scale">Forced Scale (Legacy Fix)</string>
     <string name="forced_scale_description">Corrects scaling issues on some older devices using SurfaceView. Only use if the image looks distorted or shifted.</string>
     <string name="hud_mirroring">HUD Mode (Horizontal Flip)</string>
@@ -842,8 +842,8 @@
     <string name="vehicle_year_error_max">Year cannot be later than %1$d</string>
     <string name="vehicle_info_restart_note">This data is sent to Android Auto every time you connect.</string>
 
-    <string name="auto_enable_hotspot">Auto-Enable Hotspot</string>
-    <string name="auto_enable_hotspot_description">Automatically starts a Wi-Fi hotspot on this device. (Won\'t work on every device)</string>
+    <string name="auto_enable_hotspot">Turn on car hotspot automatically</string>
+    <string name="auto_enable_hotspot_description">Starts the car Wi‑Fi hotspot when DiAuto needs it for wireless Android Auto. On by default on MG4.</string>
     <string name="hotspot_warning_title">Experimental Feature</string>
     <string name="hotspot_warning_message">This feature uses reflection and might not work on all devices. It may also require the "Modify system settings" permission to be granted manually.</string>
     <string name="hotspot_permission_title">Permission Required</string>
@@ -1058,7 +1058,7 @@
     <string name="setup_open_car_hotspot_settings">Open car hotspot settings</string>
     <string name="setup_save_and_use_hotspot">Save hotspot details and use this mode</string>
     <string name="setup_hotspot_pending">Finish setup · Save your hotspot details to use this mode.</string>
-    <string name="setup_turn_hotspot_on_automatically">Turn hotspot on automatically</string>
+    <string name="setup_turn_hotspot_on_automatically">Turn on car hotspot automatically</string>
     <string name="setup_auto_hotspot_hint">Optional. Requires Modify system settings access and compatible car firmware. If the hotspot stays off, turn it on in car settings.</string>
     <string name="setup_allow_automatic_hotspot_control">Allow automatic hotspot control</string>
     <string name="setup_system_settings_access_allowed">System settings access allowed</string>
