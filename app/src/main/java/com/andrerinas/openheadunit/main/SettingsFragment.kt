@@ -1314,24 +1314,15 @@ class SettingsFragment : Fragment() {
         items.add(SettingItem.SettingEntry(
             stableId = "startInFullscreenMode",
             nameResId = R.string.start_in_fullscreen_mode,
-            value = when (pendingFullscreenMode) {
-                Settings.FullscreenMode.NONE -> getString(R.string.fullscreen_none)
-                Settings.FullscreenMode.IMMERSIVE -> getString(R.string.fullscreen_immersive)
-                Settings.FullscreenMode.STATUS_ONLY -> getString(R.string.fullscreen_status_only)
-                Settings.FullscreenMode.IMMERSIVE_WITH_NOTCH -> getString(R.string.fullscreen_immersive_avoid_notch)
-                else -> getString(R.string.auto)
-            },
+            value = fullscreenModeLabel(pendingFullscreenMode),
             onClick = {
-                val modes = arrayOf(
-                    getString(R.string.fullscreen_none),
-                    getString(R.string.fullscreen_immersive),
-                    getString(R.string.fullscreen_status_only),
-                    getString(R.string.fullscreen_immersive_avoid_notch)
-                )
+                val modes = Settings.FullscreenMode.displayOrder
+                val labels = modes.map { fullscreenModeLabel(it) }.toTypedArray()
+                val selected = modes.indexOf(pendingFullscreenMode).coerceAtLeast(0)
                 MaterialAlertDialogBuilder(requireContext(), R.style.DarkAlertDialog)
                     .setTitle(R.string.start_in_fullscreen_mode)
-                    .setSingleChoiceItems(modes, pendingFullscreenMode?.value ?: 0) { dialog, which ->
-                        val newMode = Settings.FullscreenMode.fromInt(which) ?: Settings.FullscreenMode.NONE
+                    .setSingleChoiceItems(labels, selected) { dialog, which ->
+                        val newMode = modes[which]
                         pendingFullscreenMode = newMode
 
                         // PERSIST IMMEDIATELY (Rescue Mode)
@@ -3123,6 +3114,15 @@ class SettingsFragment : Fragment() {
                 updateSettingsList()
             }
             .show()
+    }
+
+    private fun fullscreenModeLabel(mode: Settings.FullscreenMode?): String = when (mode) {
+        Settings.FullscreenMode.NONE -> getString(R.string.fullscreen_none)
+        Settings.FullscreenMode.IMMERSIVE -> getString(R.string.fullscreen_immersive)
+        Settings.FullscreenMode.STATUS_ONLY -> getString(R.string.fullscreen_status_only)
+        Settings.FullscreenMode.NAV_ONLY -> getString(R.string.fullscreen_nav_only)
+        Settings.FullscreenMode.IMMERSIVE_WITH_NOTCH -> getString(R.string.fullscreen_immersive_avoid_notch)
+        null -> getString(R.string.auto)
     }
 
     private fun showCustomInsetsDialog() {

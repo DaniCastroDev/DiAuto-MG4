@@ -1491,12 +1491,18 @@ class Settings(private val context: Context) {
     enum class FullscreenMode(val value: Int) {
         NONE(0),
         IMMERSIVE(1),
+        /** Hide top / status bar; keep navigation (left) bar. */
         STATUS_ONLY(2),
-        IMMERSIVE_WITH_NOTCH(3);
+        IMMERSIVE_WITH_NOTCH(3),
+        /** Hide navigation (left) bar; keep top / status bar. */
+        NAV_ONLY(4);
 
         companion object {
             private val map = values().associateBy(FullscreenMode::value)
             fun fromInt(value: Int) = map[value]
+
+            /** Order shown in settings dialogs (not the same as [value] order). */
+            val displayOrder = listOf(NONE, IMMERSIVE, STATUS_ONLY, NAV_ONLY, IMMERSIVE_WITH_NOTCH)
         }
     }
 

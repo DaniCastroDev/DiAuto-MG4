@@ -301,10 +301,11 @@
     <string name="margin_bottom">Bottom</string>
 
     <string name="start_in_fullscreen_mode">Screen mode</string>
-    <string name="start_in_fullscreen_mode_description">Choose how system bars (status and navigation) should be handled.</string>
+    <string name="start_in_fullscreen_mode_description">Choose how system bars (top and left) should be handled.</string>
     <string name="fullscreen_none">Normal (All bars visible)</string>
     <string name="fullscreen_immersive">Immersive (Overlay Notch)</string>
-    <string name="fullscreen_status_only">Hide status bar only</string>
+    <string name="fullscreen_status_only">Hide top bar only</string>
+    <string name="fullscreen_nav_only">Hide left bar only</string>
     <string name="fullscreen_immersive_avoid_notch">Immersive (Avoid Notch)</string>
     <string name="fullscreen_immersive_avoid_notch_desc">Hides all bars and adds padding to prevent the projection from being covered by the Notch/Cutout.</string>
 
@@ -379,7 +380,7 @@
     <string name="usb_auto_connect">Auto-connect USB</string>
     <string name="usb_auto_connect_description">Automatically connect to a known USB device when the application is opened.</string>
     <string name="auto_start_bt_label">Auto-start on Bluetooth</string>
-    <string name="auto_start_bt_description">Automatically open Open Headunit when a specific Bluetooth device connects.</string>
+    <string name="auto_start_bt_description">When this phone connects to the car over Bluetooth, DiAuto starts wireless Android Auto automatically — no need to pick the phone on screen. First successful Connect also saves the phone here.</string>
     <string name="listen_for_usb_devices_label">Listen for USB Devices</string>
     <string name="listen_for_usb_devices_description">Show the Android system prompt when a USB device is plugged in.</string>
     <string name="block_oem_android_auto_label">Block OEM Android Auto while DiAuto runs</string>

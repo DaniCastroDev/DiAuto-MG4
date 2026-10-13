@@ -133,8 +133,10 @@ class SystemOptimizer(private val context: Context) {
             return when {
                 longSide <= 0 -> Settings.Resolution._1280x720
                 longSide <= 800 && shortSide <= 480 -> Settings.Resolution._800x480
-                (longSide >= 3840 || shortSide >= 2160) && hevcHiRes -> Settings.Resolution._3840x2160
-                (longSide >= 2560 || shortSide >= 1440) && hevcHiRes -> Settings.Resolution._2560x1440
+                // Both sides must clear the bar — a single inflated metric must not jump a
+                // 1080p head unit (e.g. MG4) to 1440p/4K and destroy the stream.
+                (longSide >= 3840 && shortSide >= 2160) && hevcHiRes -> Settings.Resolution._3840x2160
+                (longSide >= 2560 && shortSide >= 1440) && hevcHiRes -> Settings.Resolution._2560x1440
                 longSide > 1280 || shortSide > 720 -> Settings.Resolution._1920x1080
                 else -> Settings.Resolution._1280x720
             }

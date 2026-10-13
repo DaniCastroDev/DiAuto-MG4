@@ -1,6 +1,7 @@
 package com.andrerinas.openheadunit.main
 
 import android.Manifest
+import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -22,6 +23,7 @@ import com.andrerinas.openheadunit.aap.AapProjectionActivity
 import com.andrerinas.openheadunit.aap.AapService
 import com.andrerinas.openheadunit.connection.CommManager
 import com.andrerinas.openheadunit.utils.BluetoothHelper
+import com.andrerinas.openheadunit.utils.Settings
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.launch
@@ -33,7 +35,7 @@ class HomeFragment : Fragment() {
     private val bluetoothPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) selectPhone()
+        if (granted) connectWireless()
         else showBluetoothHelp(R.string.bt_permission_denied)
     }
 
@@ -46,7 +48,7 @@ class HomeFragment : Fragment() {
             else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
                 ContextCompat.checkSelfPermission(requireContext(), Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                 bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
-            } else selectPhone()
+            } else connectWireless()
         }
         view.findViewById<View>(R.id.usb_button).setOnClickListener {
             if (app.commManager.isConnected) openProjection()
@@ -82,15 +84,19 @@ class HomeFragment : Fragment() {
         })
     }
 
-    private fun selectPhone() {
+    /**
+     * Prefer the phone already linked over Bluetooth — no picker. Only ask when several phones
+     * are connected at once and none is the remembered auto-start device.
+     */
+    private fun connectWireless() {
         val adapter = BluetoothHelper.getBluetoothAdapter(requireContext())
         try {
             if (adapter == null || !adapter.isEnabled) {
                 showBluetoothHelp(R.string.da_bluetooth_off)
                 return
             }
-            val devices = adapter.bondedDevices.orEmpty().sortedBy { it.name ?: it.address }
-            if (devices.isEmpty()) {
+            val bonded = adapter.bondedDevices.orEmpty()
+            if (bonded.isEmpty()) {
                 showBluetoothHelp(R.string.da_no_paired)
                 return
             }
@@ -98,20 +104,33 @@ class HomeFragment : Fragment() {
                 showBluetoothHelp(R.string.da_no_connected_bluetooth)
                 return
             }
+
+            val connected = BluetoothHelper.connectedBondedDevices(requireContext())
+            val preferredMacs = app.settings.autoStartBluetoothDeviceMacs
+            val preferredConnected = connected.filter { preferredMacs.contains(it.address) }
+
+            val target = when {
+                preferredConnected.size == 1 -> preferredConnected[0]
+                preferredConnected.isEmpty() && connected.size == 1 -> connected[0]
+                preferredConnected.size > 1 -> null // ambiguous preferred set
+                connected.size > 1 -> null
+                // Per-device isConnected unavailable: fall back to a single preferred bonded MAC.
+                preferredMacs.size == 1 -> bonded.firstOrNull { it.address == preferredMacs.first() }
+                else -> null
+            }
+
+            if (target != null) {
+                startNativeAa(target)
+                return
+            }
+
+            // Ambiguous: only offer currently connected phones when we can see them.
+            val choices = if (connected.isNotEmpty()) connected else bonded.sortedBy { it.name ?: it.address }
             activeDialog?.dismiss()
             activeDialog = MaterialAlertDialogBuilder(requireContext(), R.style.DarkAlertDialog)
                 .setTitle(R.string.da_connect)
-                .setItems(devices.map { it.name ?: getString(R.string.da_device) }.toTypedArray()) { _, index ->
-                    val device = devices[index]
-                    // The button explicitly selects native wireless AA, including on upgrades
-                    // from upstream installations that used the phone helper.
-                    app.settings.wifiConnectionMode = 3
-                    (activity as? MainActivity)?.beginAutoConnect(
-                        "manual native wireless", MainActivity.ConnectionUiMode.PILL)
-                    ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java).apply {
-                        action = AapService.ACTION_NATIVE_AA_POKE
-                        putExtra(AapService.EXTRA_MAC, device.address)
-                    })
+                .setItems(choices.map { it.name ?: getString(R.string.da_device) }.toTypedArray()) { _, index ->
+                    startNativeAa(choices[index])
                 }
                 .setNeutralButton(R.string.da_pair) { _, _ -> openBluetoothSettings() }
                 .setNegativeButton(R.string.cancel, null)
@@ -119,6 +138,24 @@ class HomeFragment : Fragment() {
         } catch (_: SecurityException) {
             showBluetoothHelp(R.string.bt_permission_denied)
         }
+    }
+
+    private fun startNativeAa(device: BluetoothDevice) {
+        app.settings.wifiConnectionMode = 3
+        // Remember this phone so the next Bluetooth ACL_CONNECTED auto-starts without a tap.
+        val macs = app.settings.autoStartBluetoothDeviceMacs
+        if (!macs.contains(device.address)) {
+            val updated = macs + device.address
+            app.settings.autoStartBluetoothDeviceMacs = updated
+            app.settings.autoStartBluetoothDeviceName = device.name ?: "Unknown Device"
+            Settings.syncAutoStartBtMacsToDeviceStorage(requireContext(), updated)
+        }
+        (activity as? MainActivity)?.beginAutoConnect(
+            "native wireless ${device.address}", MainActivity.ConnectionUiMode.PILL)
+        ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java).apply {
+            action = AapService.ACTION_NATIVE_AA_POKE
+            putExtra(AapService.EXTRA_MAC, device.address)
+        })
     }
 
     private fun showBluetoothHelp(message: Int) {

@@ -141,6 +141,29 @@ object BluetoothHelper {
     private const val PROFILE_A2DP_SINK = 11
 
     /**
+     * Paired devices the adapter currently reports as connected (via hidden
+     * [BluetoothDevice.isConnected] when available). Empty when none are connected or the
+     * stack will not disclose per-device state.
+     */
+    @SuppressLint("MissingPermission")
+    fun connectedBondedDevices(context: Context): List<android.bluetooth.BluetoothDevice> {
+        val adapter = try { getBluetoothAdapter(context) } catch (_: Exception) { return emptyList() }
+            ?: return emptyList()
+        if (try { !adapter.isEnabled } catch (_: Exception) { false }) return emptyList()
+        val bonded = try { adapter.bondedDevices.orEmpty() } catch (_: Exception) { emptySet() }
+        val connected = mutableListOf<android.bluetooth.BluetoothDevice>()
+        for (device in bonded) {
+            try {
+                val method = device.javaClass.getMethod("isConnected")
+                if ((method.invoke(device) as? Boolean) == true) connected.add(device)
+            } catch (_: Exception) {
+                // Per-device state unavailable on this stack.
+            }
+        }
+        return connected.sortedBy { it.name ?: it.address }
+    }
+
+    /**
      * Whether at least one paired device is currently connected to this adapter. Reflection gives
      * the most accurate per-device result on the platform-signed MG4 build; profile state is a
      * fallback for Android variants that hide BluetoothDevice.isConnected(). Null means the stack

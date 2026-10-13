@@ -134,7 +134,7 @@ class QuickSettingsFragment : DialogFragment() {
         items.add(SettingItem.SettingEntry(
             stableId = "fullscreenMode",
             nameResId = R.string.start_in_fullscreen_mode,
-            value = fullscreenModeLabels()[settings.fullscreenMode.value],
+            value = fullscreenModeLabel(settings.fullscreenMode),
             onClick = { showFullscreenDialog() }
         ))
 
@@ -240,12 +240,13 @@ class QuickSettingsFragment : DialogFragment() {
         LocalBroadcastManager.getInstance(requireContext()).sendBroadcast(intent)
     }
 
-    private fun fullscreenModeLabels() = arrayOf(
-        getString(R.string.fullscreen_none),
-        getString(R.string.fullscreen_immersive),
-        getString(R.string.fullscreen_status_only),
-        getString(R.string.fullscreen_immersive_avoid_notch)
-    )
+    private fun fullscreenModeLabel(mode: Settings.FullscreenMode): String = when (mode) {
+        Settings.FullscreenMode.NONE -> getString(R.string.fullscreen_none)
+        Settings.FullscreenMode.IMMERSIVE -> getString(R.string.fullscreen_immersive)
+        Settings.FullscreenMode.STATUS_ONLY -> getString(R.string.fullscreen_status_only)
+        Settings.FullscreenMode.NAV_ONLY -> getString(R.string.fullscreen_nav_only)
+        Settings.FullscreenMode.IMMERSIVE_WITH_NOTCH -> getString(R.string.fullscreen_immersive_avoid_notch)
+    }
 
     private fun showOrientationDialog() {
         val options = resources.getStringArray(R.array.screen_orientation)
@@ -266,11 +267,13 @@ class QuickSettingsFragment : DialogFragment() {
     }
 
     private fun showFullscreenDialog() {
+        val modes = Settings.FullscreenMode.displayOrder
+        val labels = modes.map { fullscreenModeLabel(it) }.toTypedArray()
+        val selected = modes.indexOf(settings.fullscreenMode).coerceAtLeast(0)
         MaterialAlertDialogBuilder(requireContext(), R.style.DarkAlertDialog)
             .setTitle(R.string.start_in_fullscreen_mode)
-            .setSingleChoiceItems(fullscreenModeLabels(), settings.fullscreenMode.value) { dialog, which ->
-                val newMode = Settings.FullscreenMode.fromInt(which) ?: Settings.FullscreenMode.NONE
-                settings.fullscreenMode = newMode
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                settings.fullscreenMode = modes[which]
                 settings.commit()
                 notifyChange(applyFullscreen = true)
                 dialog.dismiss()

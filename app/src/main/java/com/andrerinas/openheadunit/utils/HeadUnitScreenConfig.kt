@@ -133,15 +133,20 @@ object HeadUnitScreenConfig {
         lastSettingsHash = currentHash
         currentSettings = settings
 
-        // Determine if we are planning to hide the bars (Immersive)
-        val immersive = settings.fullscreenMode == Settings.FullscreenMode.IMMERSIVE || 
+        // Full immersive (both bars hidden) or partial (top-only / left-only): the window is
+        // edge-to-edge, so the anchor is the physical screen. Remaining visible bars are then
+        // subtracted via updateInsets(). Using "usable" here for STATUS_ONLY left a short
+        // height even after the top bar was gone, so AA looked cropped from the top.
+        val immersive = settings.fullscreenMode == Settings.FullscreenMode.IMMERSIVE ||
                         settings.fullscreenMode == Settings.FullscreenMode.IMMERSIVE_WITH_NOTCH
+        val edgeToEdge = immersive ||
+            settings.fullscreenMode == Settings.FullscreenMode.STATUS_ONLY ||
+            settings.fullscreenMode == Settings.FullscreenMode.NAV_ONLY
 
-        // THE ANCHOR: 
-        // If we are immersive, our "World" is the physical screen. 
-        // If we are NOT, our "World" is limited to the usable window area (no lying to AA).
-        val defaultAnchorW = if (immersive) finalRealW else finalUsableW
-        val defaultAnchorH = if (immersive) finalRealH else finalUsableH
+        // THE ANCHOR:
+        // Edge-to-edge modes: physical screen. Normal: usable window (bars already baked in).
+        val defaultAnchorW = if (edgeToEdge) finalRealW else finalUsableW
+        val defaultAnchorH = if (edgeToEdge) finalRealH else finalUsableH
         
         density = displayMetrics.density
         densityDpi = displayMetrics.densityDpi
@@ -169,7 +174,7 @@ object HeadUnitScreenConfig {
             // before the fullscreen enforcer had run) must never shrink the immersive anchor
             // below the window we are actually drawing into - that reintroduces the stretch
             // and the touch offset. Self-heals a stale cache instead of requiring a wipe.
-            if (immersive && (realScreenWidthPx < defaultAnchorW || realScreenHeightPx < defaultAnchorH)) {
+            if (edgeToEdge && (realScreenWidthPx < defaultAnchorW || realScreenHeightPx < defaultAnchorH)) {
                 AppLog.i("[UI_DEBUG_FIX] HeadUnitScreenConfig: Stale cached anchor ${realScreenWidthPx}x${realScreenHeightPx} < window ${defaultAnchorW}x${defaultAnchorH}; using the window.")
                 realScreenWidthPx = Math.max(realScreenWidthPx, defaultAnchorW)
                 realScreenHeightPx = Math.max(realScreenHeightPx, defaultAnchorH)
@@ -258,7 +263,10 @@ object HeadUnitScreenConfig {
         }
 
         val selectedResolution = Settings.Resolution.fromId(currentSettings.resolutionId)
-        val isPortraitDisplay = screenHeightPx > screenWidthPx
+        // Orientation for the AA stream must follow the physical panel, not the inset-shrunk
+        // usable box. A wide left nav can make usable width < height and AUTO would then ask
+        // for portrait 1080x1920 on a landscape HU — the picture looks destroyed.
+        val isPortraitDisplay = realScreenHeightPx > realScreenWidthPx
         val canNegotiateHevc = canNegotiateHevcHighResolution()
 
         // 1. Determine base negotiated resolution
@@ -275,24 +283,12 @@ object HeadUnitScreenConfig {
         }
         
         if (!isResolutionLocked && selectedResolution == Settings.Resolution.AUTO) {
-            if (isPortraitDisplay) {
-                negotiatedResolutionType = if (screenWidthPx > 720 || screenHeightPx > 1280) {
-                    Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1080x1920
-                } else {
-                    Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._720x1280
-                }
-            } else {
-                negotiatedResolutionType = when {
-                    screenWidthPx <= 800 && screenHeightPx <= 480 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._800x480
-                    (screenWidthPx >= 3840 || screenHeightPx >= 2160) && VideoDecoder.isHevcSupported() && Build.VERSION.SDK_INT >= 24 -> 
-                        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._3840x2160
-                    (screenWidthPx >= 2560 || screenHeightPx >= 1440) && canNegotiateHevc && Build.VERSION.SDK_INT >= 24 ->
-                        Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._2560x1440
-                    screenWidthPx > 1280 || screenHeightPx > 720 -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1920x1080
-                    else -> Control.Service.MediaSinkService.VideoConfiguration.VideoCodecResolutionType._1280x720
-                }
-            }
-        } else {
+            // Same bucket as the panel cap / settings "recommended" — never a second ladder on
+            // usable pixels that can diverge (and blow past 1080p) after bar insets change.
+            negotiatedResolutionType = autoResolutionForPanel(
+                realScreenWidthPx, realScreenHeightPx, isPortraitDisplay, canNegotiateHevc
+            )
+        } else if (!isResolutionLocked) {
             // Manual selection: map to the correct orientation via the shared helper.
             negotiatedResolutionType = protoForResolution(
                 selectedResolution ?: Settings.Resolution._800x480, isPortraitDisplay
@@ -319,11 +315,11 @@ object HeadUnitScreenConfig {
         // 2. Perform scaling calculations (now safe because negotiatedResolutionType is set)
         AppLog.i("[UI_DEBUG] CarScreen: usable area ${screenWidthPx}x${screenHeightPx}, using $negotiatedResolutionType")
 
-        if (screenHeightPx > screenWidthPx) {
-            isSmallScreen = screenWidthPx <= 1080 && screenHeightPx <= 1920
-        } else {
-            isSmallScreen = screenWidthPx <= 1920 && screenHeightPx <= 1080
-        }
+        // 1080p-class automotive panels (and slight OEM overscan) stay on the 1:1 path.
+        // Crossing the old exact 1920x1080 line enabled scaleFactor and wrecked Auto.
+        val longUsable = maxOf(screenWidthPx, screenHeightPx)
+        val shortUsable = minOf(screenWidthPx, screenHeightPx)
+        isSmallScreen = longUsable <= 1920 && shortUsable <= 1200
 
         scaleFactor = 1.0f
         if (!isSmallScreen) {

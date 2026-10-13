@@ -16,6 +16,18 @@ battery SoC forwarded into Google Maps via Android Auto `VehicleEnergyModel`
 - **Demo battery values**: manual SoC / range / capacity (skips EVHardware; desk testing).
 - Application id: `com.drivehub.diauto.mg4` (phone desk build: `.phone` suffix).
 
+## Installing APKs on the MG4
+
+If you haven't sideloaded apps before:
+
+1. Open **Bluetooth Settings** and select the car name.
+2. Hold down on the **comma** until the settings appear.
+3. Select **Android Keyboard Settings**.
+4. Select **Languages**.
+5. Use the search box at the top to search for **file**.
+6. That should give you access to the **Files** app.
+7. From there, select a connected USB device with APKs on it and install as usual.
+
 ## Build
 
 **MG4 car** (platform-signed, `android.uid.system`):

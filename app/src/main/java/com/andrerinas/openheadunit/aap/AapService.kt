@@ -2087,15 +2087,32 @@ class AapService : Service(), UsbReceiver.Listener {
                 // later ACL_CONNECTED (the phone's own Bluetooth profiles reconnecting, or one
                 // of our pokes) would tear down a session that is projecting fine.
                 val settings = App.provide(this).settings
+                val mac = intent?.getStringExtra(EXTRA_MAC)
                 val sessionUp = commManager.isConnected ||
                     commManager.connectionState.value is CommManager.ConnectionState.Connecting
-                if (settings.wifiConnectionMode == 3 && !sessionUp &&
-                    nativeAaHandshakeManager?.isActive() != true &&
-                    nativeAaHandshakeManager?.isAttemptInFlight() != true) {
-                    AppLog.i("AapService: Bluetooth auto-start — Native AA handshake manager was stopped, re-arming.")
+                if (sessionUp) {
+                    AppLog.d("AapService: Bluetooth auto-start ignored — session already up.")
+                } else {
+                    // Trusted Bluetooth phone just linked — go straight to Native AA; do not wait
+                    // for the user to pick the phone on the home screen.
+                    if (settings.wifiConnectionMode != 3) {
+                        AppLog.i("AapService: Bluetooth auto-start — switching wifi mode to Native AA")
+                        settings.wifiConnectionMode = 3
+                    }
                     userExitedAA = false
                     userExitCooldownUntil = 0L
-                    initWifiMode(force = true)
+                    val needsArm =
+                        activeWifiMode != 3 ||
+                            (nativeAaHandshakeManager?.isActive() != true &&
+                                nativeAaHandshakeManager?.isAttemptInFlight() != true)
+                    if (needsArm) {
+                        AppLog.i("AapService: Bluetooth auto-start — arming Native AA handshake.")
+                        initWifiMode(force = true)
+                    }
+                    if (!mac.isNullOrEmpty()) {
+                        AppLog.i("AapService: Bluetooth auto-start — poking $mac")
+                        nativeAaHandshakeManager?.manualPoke(mac)
+                    }
                 }
             }
             ACTION_NEARBY_CONNECT         -> {

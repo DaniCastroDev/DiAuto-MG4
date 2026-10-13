@@ -4,13 +4,10 @@ import android.graphics.Color
 import android.os.Build
 import android.view.View
 import android.view.Window
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.view.WindowManager
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.andrerinas.openheadunit.utils.AppLog
 
 object SystemUI {
 
@@ -45,6 +42,11 @@ object SystemUI {
                 controllerCompat.show(WindowInsetsCompat.Type.navigationBars())
                 controllerCompat.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             }
+            Settings.FullscreenMode.NAV_ONLY -> {
+                controllerCompat.hide(WindowInsetsCompat.Type.navigationBars())
+                controllerCompat.show(WindowInsetsCompat.Type.statusBars())
+                controllerCompat.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
             Settings.FullscreenMode.NONE -> {
                 controllerCompat.show(WindowInsetsCompat.Type.systemBars())
             }
@@ -54,14 +56,14 @@ object SystemUI {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
             @Suppress("DEPRECATION")
             var flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            
+
             when (mode) {
                 Settings.FullscreenMode.IMMERSIVE, Settings.FullscreenMode.IMMERSIVE_WITH_NOTCH -> {
-                    flags = flags or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or 
+                    flags = flags or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                            View.SYSTEM_UI_FLAG_FULLSCREEN or 
+                            View.SYSTEM_UI_FLAG_FULLSCREEN or
                             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            
+
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                         flags = flags or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                     } else {
@@ -77,6 +79,15 @@ object SystemUI {
                         flags = flags or View.SYSTEM_UI_FLAG_LOW_PROFILE
                     }
                 }
+                Settings.FullscreenMode.NAV_ONLY -> {
+                    flags = flags or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                        flags = flags or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    } else {
+                        flags = flags or View.SYSTEM_UI_FLAG_LOW_PROFILE
+                    }
+                }
                 Settings.FullscreenMode.NONE -> {
                     // Reset flags for normal mode
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
@@ -84,7 +95,8 @@ object SystemUI {
                     }
                 }
             }
-            
+
+            @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = flags
         }
 
@@ -93,13 +105,17 @@ object SystemUI {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
                 if (Build.VERSION.SDK_INT < 35) {
-                    window.statusBarColor = Color.BLACK
+                    if (mode == Settings.FullscreenMode.NONE || mode == Settings.FullscreenMode.NAV_ONLY) {
+                        window.statusBarColor = Color.BLACK
+                    }
                     if (mode == Settings.FullscreenMode.NONE || mode == Settings.FullscreenMode.STATUS_ONLY) {
                         window.navigationBarColor = Color.BLACK
                     }
                 }
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+                if (mode == Settings.FullscreenMode.NONE || mode == Settings.FullscreenMode.NAV_ONLY) {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+                }
                 if (mode == Settings.FullscreenMode.NONE || mode == Settings.FullscreenMode.STATUS_ONLY) {
                     window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
                 }
@@ -165,10 +181,13 @@ object SystemUI {
                     }
                 }
                 Settings.FullscreenMode.STATUS_ONLY -> {
+                    // Top hidden on purpose — pad only for the remaining nav (left) bar.
+                    // Including displayCutout() re-applied the top strip and AA looked shorter.
                     typeMask = WindowInsetsCompat.Type.navigationBars()
-                    if (Build.VERSION.SDK_INT >= 28) {
-                        typeMask = typeMask or WindowInsetsCompat.Type.displayCutout()
-                    }
+                }
+                Settings.FullscreenMode.NAV_ONLY -> {
+                    // Left hidden on purpose — pad only for the remaining top / status bar.
+                    typeMask = WindowInsetsCompat.Type.statusBars()
                 }
                 else -> {
                     typeMask = WindowInsetsCompat.Type.systemBars()

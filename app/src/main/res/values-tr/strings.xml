@@ -125,10 +125,11 @@
     <string name="margin_bottom">Alt</string>
 
     <string name="start_in_fullscreen_mode">Ekran modu</string>
-    <string name="start_in_fullscreen_mode_description">Sistem çubuklarının (durum ve navigasyon) nasıl işleneceğini seçin.</string>
+    <string name="start_in_fullscreen_mode_description">Sistem çubuklarının (üst ve sol) nasıl işleneceğini seçin.</string>
     <string name="fullscreen_none">Normal (Tüm çubuklar görünür)</string>
     <string name="fullscreen_immersive">Tam Ekran (Çentik Üstü)</string>
-    <string name="fullscreen_status_only">Sadece durum çubuğunu gizle</string>
+    <string name="fullscreen_status_only">Sadece üst çubuğu gizle</string>
+    <string name="fullscreen_nav_only">Sadece sol çubuğu gizle</string>
     <string name="fullscreen_immersive_avoid_notch">Tam Ekran (Çentiği Koru)</string>
     <string name="fullscreen_immersive_avoid_notch_desc">Tüm çubukları gizler ve görüntünün çentik/kesik tarafından kapatılmasını önlemek için dolgu ekler.</string>
 
@@ -200,7 +201,7 @@
     <string name="usb_auto_connect">USB Otomatik Bağlan</string>
     <string name="usb_auto_connect_description">Uygulama açıldığında bilinen bir USB cihazına otomatik olarak bağlan.</string>
     <string name="auto_start_bt_label">Bluetooth ile otomatik başlat</string>
-    <string name="auto_start_bt_description">Belirli bir Bluetooth cihazı bağlandığında Open Headunit\'ı otomatik olarak aç.</string>
+    <string name="auto_start_bt_description">Telefon arabaya Bluetooth ile bağlanınca DiAuto kablosuz Android Auto\'yu kendisi başlatır — ekrandan telefon seçmeye gerek yok. İlk başarılı Bağlan da telefonu buraya kaydeder.</string>
     <string name="auto_start_wifi_label">WiFi ile otomatik başlat</string>
     <string name="auto_start_wifi_description">Belirli bir WiFi SSID\'sine bağlandığında Open Headunit\'ı otomatik olarak aç.</string>
     <string name="auto_start_wifi_ssid_label">WiFi SSID</string>

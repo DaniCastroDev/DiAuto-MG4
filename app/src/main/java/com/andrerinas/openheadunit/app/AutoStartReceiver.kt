@@ -71,13 +71,18 @@ class AutoStartReceiver : BroadcastReceiver() {
             AppLog.i("BT Device connected: ${name ?: "unnamed"} ($address)")
 
             if (targetMacs.contains(address)) {
-                AppLog.i("MATCH! Starting AapService via Bluetooth Auto-start (background, no UI)...")
+                AppLog.i("MATCH! Starting AapService via Bluetooth Auto-start for $address (background, no UI)...")
 
                 // Service only: Native AA handshake / SoftAP bring-up run without pulling
                 // MainActivity to the front. ACL_CONNECTED can fire repeatedly (profiles
                 // reconnecting); launching the UI each time steals the car screen. Projection
                 // still opens on HandshakeComplete when a session actually lands.
-                val serviceIntent = Intent(context, AapService::class.java).setAction(AapService.ACTION_BT_AUTO_START)
+                // Pass the MAC so Native AA can poke this phone immediately — waiting for the
+                // user to pick it on the home screen is the awkward path this avoids.
+                val serviceIntent = Intent(context, AapService::class.java).apply {
+                    setAction(AapService.ACTION_BT_AUTO_START)
+                    putExtra(AapService.EXTRA_MAC, address)
+                }
                 var serviceStarted = true
                 try {
                     ContextCompat.startForegroundService(context, serviceIntent)
