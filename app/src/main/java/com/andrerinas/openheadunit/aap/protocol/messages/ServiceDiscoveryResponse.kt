@@ -264,6 +264,12 @@ class ServiceDiscoveryResponse(private val context: Context)
                     }
                 }
                 if (!AapService.selfMode && !omitMedia) {
+                    // Do not release A2DP here: Native AA still rides BT until Wi‑Fi lands.
+                    // AapService releases media profiles after TransportStarted settles.
+                    AppLog.i(
+                        "[ServiceDiscovery] Wi‑Fi media: advertising AA MEDIA sink " +
+                            "(a2dp=${BluetoothHelper.a2dpMediaLinkState(context)})",
+                    )
                     val audio0 = Control.Service.newBuilder().also { service ->
                         service.id = Channel.ID_AUD
                         service.mediaSinkService = Control.Service.MediaSinkService.newBuilder().also {
@@ -290,15 +296,18 @@ class ServiceDiscoveryResponse(private val context: Context)
             }.build()
             services.add(mic)
 
-            // Bluetooth Service
+            // Bluetooth Service — always advertise A2DP+HFP (phone pairing UI). Wi‑Fi media
+            // path drops the live A2DP link after handoff via BluetoothHelper, not here.
             if (settings.bluetoothAddress.isNotEmpty()) {
                 val bluetooth = Control.Service.newBuilder().also { service ->
                     service.id = Channel.ID_BTH
                     service.bluetoothService = Control.Service.BluetoothService.newBuilder().also {
                         it.carAddress = settings.bluetoothAddress
                         it.addAllSupportedPairingMethods(
-                                listOf(Control.BluetoothPairingMethod.A2DP,
-                                        Control.BluetoothPairingMethod.HFP)
+                            listOf(
+                                Control.BluetoothPairingMethod.A2DP,
+                                Control.BluetoothPairingMethod.HFP,
+                            ),
                         )
                     }.build()
                 }.build()

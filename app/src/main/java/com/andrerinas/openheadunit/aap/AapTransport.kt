@@ -792,7 +792,10 @@ class AapTransport(
     }
 
     internal fun gainVideoFocus() {
-        context.sendBroadcast(ProjectionActivityRequest())
+        // Explicit package: system UID must not send implicit non-protected broadcasts.
+        context.sendBroadcast(
+            ProjectionActivityRequest().apply { setPackage(context.packageName) },
+        )
     }
 
     internal fun sendMediaAck(channel: Int) {

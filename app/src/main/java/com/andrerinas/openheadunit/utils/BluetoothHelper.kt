@@ -140,6 +140,9 @@ object BluetoothHelper {
      */
     private const val PROFILE_A2DP_SINK = 11
 
+    /** Hidden `BluetoothProfile.AVRCP_CONTROLLER` — factory media keys / pause over classic BT. */
+    private const val PROFILE_AVRCP_CONTROLLER = 12
+
     /**
      * Paired devices the adapter currently reports as connected (via hidden
      * [BluetoothDevice.isConnected] when available). Empty when none are connected or the
@@ -312,6 +315,94 @@ object BluetoothHelper {
             adapter.getProfileProxy(context.applicationContext, listener, profile)
         } catch (e: Exception) {
             AppLog.w("BluetoothHelper: ensureBtAudio getProfileProxy($profile) failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Best-effort: drop A2DP / A2DP_SINK / AVRCP so Wi‑Fi AA MEDIA is not mixed with car
+     * Bluetooth Music. Leaves HFP alone (calls) and does not disable the BT radio.
+     *
+     * Prefer [preferredAddress] when set. SAIC stacks often re-attach A2DP after RFCOMM churn —
+     * callers should retry a few times (e.g. 0 / 2s / 5s).
+     */
+    @SuppressLint("MissingPermission")
+    fun releaseCarBluetoothMediaLink(context: Context, preferredAddress: String? = null): Boolean {
+        val a2dpUp = a2dpMediaLinkState(context)
+        if (a2dpUp == false) {
+            AppLog.i("BluetoothHelper: releaseBtMedia — A2DP already down")
+            return true
+        }
+        val adapter = try {
+            getBluetoothAdapter(context)
+        } catch (e: Exception) {
+            AppLog.w("BluetoothHelper: releaseBtMedia — no adapter: ${e.message}")
+            return false
+        } ?: return false
+        val bonded = try {
+            adapter.bondedDevices.orEmpty().toList()
+        } catch (e: Exception) {
+            AppLog.w("BluetoothHelper: releaseBtMedia — bondedDevices failed: ${e.message}")
+            emptyList()
+        }
+        if (bonded.isEmpty()) {
+            AppLog.w("BluetoothHelper: releaseBtMedia — no bonded devices")
+            return false
+        }
+        val preferred = preferredAddress?.trim()?.uppercase(java.util.Locale.US).orEmpty()
+        val ordered = if (preferred.isEmpty()) {
+            bonded
+        } else {
+            bonded.sortedByDescending { it.address?.uppercase(java.util.Locale.US) == preferred }
+        }
+        var asked = false
+        for (device in ordered) {
+            asked = requestProfileDisconnect(adapter, context, device, BluetoothProfile.A2DP) || asked
+            asked = requestProfileDisconnect(adapter, context, device, PROFILE_A2DP_SINK) || asked
+            asked = requestProfileDisconnect(adapter, context, device, PROFILE_AVRCP_CONTROLLER) || asked
+        }
+        AppLog.i(
+            "BluetoothHelper: releaseBtMedia asked=$asked a2dpBefore=$a2dpUp " +
+                "preferred=${preferred.ifEmpty { "—" }}",
+        )
+        return asked
+    }
+
+    private fun requestProfileDisconnect(
+        adapter: BluetoothAdapter,
+        context: Context,
+        device: android.bluetooth.BluetoothDevice,
+        profile: Int,
+    ): Boolean {
+        return try {
+            val listener = object : BluetoothProfile.ServiceListener {
+                override fun onServiceConnected(profileId: Int, proxy: BluetoothProfile) {
+                    try {
+                        val disconnect = proxy.javaClass.methods.firstOrNull { method ->
+                            method.name == "disconnect" &&
+                                method.parameterTypes.size == 1 &&
+                                method.parameterTypes[0].isAssignableFrom(android.bluetooth.BluetoothDevice::class.java)
+                        }
+                        val ok = disconnect?.invoke(proxy, device) as? Boolean
+                        AppLog.i(
+                            "BluetoothHelper: releaseBtMedia profile=$profileId " +
+                                "disconnect(${device.address}) → $ok",
+                        )
+                    } catch (e: Exception) {
+                        AppLog.w("BluetoothHelper: releaseBtMedia profile=$profileId disconnect failed: ${e.message}")
+                    } finally {
+                        try {
+                            adapter.closeProfileProxy(profileId, proxy)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
+
+                override fun onServiceDisconnected(profileId: Int) {}
+            }
+            adapter.getProfileProxy(context.applicationContext, listener, profile)
+        } catch (e: Exception) {
+            AppLog.w("BluetoothHelper: releaseBtMedia getProfileProxy($profile) failed: ${e.message}")
             false
         }
     }

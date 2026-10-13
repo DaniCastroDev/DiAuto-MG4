@@ -1048,6 +1048,7 @@ class AapService : Service(), UsbReceiver.Listener {
         requestPermanentAudioFocus()
 
         maybeSwitchCarToBtMusic()
+        maybeReleaseCarBtMediaForWifiAudio()
 
         // Start GpsLocationService and NightModeManager sensor tracking
         AppLog.i("AapService: Starting GpsLocationService and NightModeManager since connection is established")
@@ -1074,6 +1075,54 @@ class AapService : Service(), UsbReceiver.Listener {
                 delay(250)
             }
             AppLog.w("AapService: could not switch car to BT Music (SAIC BT music service not ready)")
+        }
+    }
+
+    /**
+     * Wi‑Fi AA media: drop car A2DP/AVRCP only after Native AA has left the BT bootstrap path.
+     * Releasing during Service Discovery / early connect tears the phone session (EOF).
+     * MG may re-attach A2DP after RFCOMM close — retry a few times. HFP stays up.
+     */
+    private fun maybeReleaseCarBtMediaForWifiAudio() {
+        if (settings.musicViaBluetooth) return
+        serviceScope.launch(Dispatchers.IO) {
+            // Wait for AAP TransportStarted, then settle past BT→Wi‑Fi handoff.
+            val started = withTimeoutOrNull(20_000L) {
+                while (commManager.connectionState.value !is CommManager.ConnectionState.TransportStarted) {
+                    when (commManager.connectionState.value) {
+                        is CommManager.ConnectionState.Disconnected,
+                        is CommManager.ConnectionState.Error -> return@withTimeoutOrNull false
+                        else -> delay(200)
+                    }
+                }
+                true
+            } == true
+            if (!started) {
+                AppLog.i("AapService: Wi‑Fi media A2DP release skipped — no TransportStarted")
+                return@launch
+            }
+            delay(3_000L)
+            for (attempt in 1..3) {
+                if (settings.musicViaBluetooth) return@launch
+                if (commManager.connectionState.value !is CommManager.ConnectionState.TransportStarted) {
+                    AppLog.i("AapService: Wi‑Fi media A2DP release stopped — session gone")
+                    return@launch
+                }
+                val state = BluetoothHelper.a2dpMediaLinkState(this@AapService)
+                if (!HybridMusicPolicy.needsReleaseBluetoothMediaLink(false, state)) {
+                    AppLog.i("AapService: Wi‑Fi media A2DP already down (attempt $attempt)")
+                    return@launch
+                }
+                val asked = BluetoothHelper.releaseCarBluetoothMediaLink(
+                    this@AapService,
+                    settings.bluetoothAddress,
+                )
+                AppLog.i(
+                    "AapService: Wi‑Fi media releaseCarBluetoothMediaLink " +
+                        "attempt=$attempt asked=$asked a2dp=$state",
+                )
+                delay(3_000L)
+            }
         }
     }
 

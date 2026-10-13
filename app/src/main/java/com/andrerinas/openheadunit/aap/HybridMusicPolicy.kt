@@ -15,4 +15,11 @@ object HybridMusicPolicy {
     /** True when hybrid is on but the car has no confirmed A2DP media link yet. */
     fun needsBluetoothMediaLink(musicViaBluetooth: Boolean, a2dpLinkState: Boolean?): Boolean =
         musicViaBluetooth && a2dpLinkState != true
+
+    /**
+     * Wi‑Fi AA media path: release car A2DP/AVRCP when a media link may still be up so the HU
+     * does not mix Bluetooth Music with Wi‑Fi MEDIA PCM.
+     */
+    fun needsReleaseBluetoothMediaLink(musicViaBluetooth: Boolean, a2dpLinkState: Boolean?): Boolean =
+        !musicViaBluetooth && a2dpLinkState != false
 }

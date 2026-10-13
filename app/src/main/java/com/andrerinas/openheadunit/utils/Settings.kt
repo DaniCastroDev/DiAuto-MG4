@@ -70,7 +70,8 @@ class Settings(private val context: Context) {
         }
 
     var resolutionId: Int
-        get() = prefs.getInt("resolutionId", 0)
+        // Default 1080p — Auto has been unreliable on MG4 wireless; new installs start here.
+        get() = prefs.getInt("resolutionId", Resolution._1920x1080.id)
         set(value) = prefs.edit().putInt("resolutionId", value).apply()
 
     // Flag to determine if the projection should stretch and ignore aspect ratio to fill the screen
@@ -316,8 +317,9 @@ class Settings(private val context: Context) {
                 prefs.edit().putInt("fullscreen-mode", migrated.value).apply()
                 return migrated
             }
-            val value = prefs.getInt("fullscreen-mode", FullscreenMode.IMMERSIVE.value)
-            return FullscreenMode.fromInt(value) ?: FullscreenMode.IMMERSIVE
+            // Default: hide the left (nav) bar only — keeps the top status strip on MG4.
+            val value = prefs.getInt("fullscreen-mode", FullscreenMode.NAV_ONLY.value)
+            return FullscreenMode.fromInt(value) ?: FullscreenMode.NAV_ONLY
         }
         set(value) { prefs.edit().putInt("fullscreen-mode", value.value).apply() }
 

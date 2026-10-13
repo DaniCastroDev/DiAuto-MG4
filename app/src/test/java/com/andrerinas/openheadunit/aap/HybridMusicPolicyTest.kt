@@ -19,4 +19,12 @@ class HybridMusicPolicyTest {
         assertFalse(HybridMusicPolicy.needsBluetoothMediaLink(true, true))
         assertFalse(HybridMusicPolicy.needsBluetoothMediaLink(false, false))
     }
+
+    @Test
+    fun `needs a2dp release when wifi media and link up or unknown`() {
+        assertTrue(HybridMusicPolicy.needsReleaseBluetoothMediaLink(false, true))
+        assertTrue(HybridMusicPolicy.needsReleaseBluetoothMediaLink(false, null))
+        assertFalse(HybridMusicPolicy.needsReleaseBluetoothMediaLink(false, false))
+        assertFalse(HybridMusicPolicy.needsReleaseBluetoothMediaLink(true, true))
+    }
 }

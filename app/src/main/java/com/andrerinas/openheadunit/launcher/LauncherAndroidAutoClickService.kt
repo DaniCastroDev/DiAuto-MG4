@@ -11,11 +11,15 @@ import com.andrerinas.openheadunit.utils.AppLog
 import com.andrerinas.openheadunit.utils.Settings
 
 /**
- * Watches the OEM MG4 launcher Android Auto tile.
+ * Watches OEM launcher Android Auto tiles across SAIC MG4 launcher variants.
  *
  * When the icon is visually inactive (not selected / not connected) and the user
  * taps it, the OEM shows a "connect USB" toast. This service intercepts that tap
- * and opens DiAuto instead of leaving the user with only the toast.
+ * and opens DiAuto instead.
+ *
+ * Supported homes:
+ * - [PKG_HMI] (`iv_android_auto` / `tv_android_auto`)
+ * - [PKG_EH32] (`aa_icon` / `aa_name`, and CPAA tile only when labelled Android Auto)
  */
 class LauncherAndroidAutoClickService : AccessibilityService() {
 
@@ -24,7 +28,8 @@ class LauncherAndroidAutoClickService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         if (event.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) return
-        if (event.packageName?.toString() != LAUNCHER_PACKAGE) return
+        val pkg = event.packageName?.toString() ?: return
+        if (pkg !in LAUNCHER_PACKAGES) return
 
         val settings = try {
             Settings(this)
@@ -37,11 +42,10 @@ class LauncherAndroidAutoClickService : AccessibilityService() {
         try {
             val viewId = source.viewIdResourceName
             if (viewId.isNullOrEmpty()) {
-                // Some builds omit the id on the event source; resolve from window root.
-                resolveFromRoot(source)
+                resolveFromRoot(pkg, source)
                 return
             }
-            if (isAndroidAutoControl(viewId)) {
+            if (isAndroidAutoControl(viewId, source)) {
                 maybeLaunch(source)
             }
         } finally {
@@ -49,15 +53,18 @@ class LauncherAndroidAutoClickService : AccessibilityService() {
         }
     }
 
-    private fun resolveFromRoot(clicked: AccessibilityNodeInfo) {
+    private fun resolveFromRoot(pkg: String, clicked: AccessibilityNodeInfo) {
         val root = rootInActiveWindow ?: return
         try {
-            for (fullId in ANDROID_AUTO_VIEW_IDS) {
+            for (suffix in ANDROID_AUTO_ID_SUFFIXES) {
+                val fullId = "$pkg$suffix"
                 val matches = root.findAccessibilityNodeInfosByViewId(fullId) ?: continue
                 try {
                     for (node in matches) {
                         if (sameNode(clicked, node) || overlapsBounds(clicked, node)) {
-                            maybeLaunch(node)
+                            if (isAndroidAutoControl(fullId, node)) {
+                                maybeLaunch(node)
+                            }
                             return
                         }
                     }
@@ -91,8 +98,26 @@ class LauncherAndroidAutoClickService : AccessibilityService() {
         launchDiAuto()
     }
 
-    private fun isAndroidAutoControl(viewId: String): Boolean {
-        return viewId.endsWith(":id/iv_android_auto") || viewId.endsWith(":id/tv_android_auto")
+    private fun isAndroidAutoControl(viewId: String, node: AccessibilityNodeInfo): Boolean {
+        val suffix = viewId.substringAfter(":id/", viewId)
+        if (suffix in AA_ONLY_IDS) return true
+        // Shared CarPlay/AA card — only when the visible label is Android Auto.
+        if (suffix in CPAA_SHARED_IDS) return looksLikeAndroidAutoLabel(node)
+        return false
+    }
+
+    private fun looksLikeAndroidAutoLabel(node: AccessibilityNodeInfo): Boolean {
+        val texts = listOfNotNull(
+            node.text?.toString(),
+            node.contentDescription?.toString(),
+            node.parent?.text?.toString(),
+            node.parent?.contentDescription?.toString(),
+        )
+        return texts.any { text ->
+            val t = text.trim()
+            t.contains("Android Auto", ignoreCase = true) &&
+                !t.contains("CarPlay", ignoreCase = true)
+        }
     }
 
     private fun launchDiAuto() {
@@ -125,12 +150,26 @@ class LauncherAndroidAutoClickService : AccessibilityService() {
 
     companion object {
         private const val TAG = "LauncherAaClick"
-        private const val LAUNCHER_PACKAGE = "com.saicmotor.hmi.launcher"
+        private const val PKG_HMI = "com.saicmotor.hmi.launcher"
+        private const val PKG_EH32 = "com.saicmotor.launcher"
         private const val DEBOUNCE_MS = 800L
 
-        private val ANDROID_AUTO_VIEW_IDS = listOf(
-            "$LAUNCHER_PACKAGE:id/iv_android_auto",
-            "$LAUNCHER_PACKAGE:id/tv_android_auto"
+        private val LAUNCHER_PACKAGES = setOf(PKG_HMI, PKG_EH32)
+
+        /** Dedicated AA controls (never CarPlay). */
+        private val AA_ONLY_IDS = setOf(
+            "iv_android_auto",
+            "tv_android_auto",
+            "aa_icon",
+            "aa_name",
         )
+
+        /** Combined CP/AA card — require Android Auto label. */
+        private val CPAA_SHARED_IDS = setOf(
+            "iv_cpaa_img",
+            "tv_cpaa_txt",
+        )
+
+        private val ANDROID_AUTO_ID_SUFFIXES = (AA_ONLY_IDS + CPAA_SHARED_IDS).map { ":id/$it" }
     }
 }
