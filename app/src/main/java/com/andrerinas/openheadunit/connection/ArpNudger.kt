@@ -1,0 +1,99 @@
+package com.andrerinas.openheadunit.connection
+
+import com.andrerinas.openheadunit.utils.AppLog
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.Inet4Address
+import java.net.InetAddress
+
+/**
+ * MG4: the SAIC firmware sets `net.ipv4.conf.{all,default}.arp_ignore = 8` (script `arp_update.sh`,
+ * section "Disable arp", meant for the internal Ethernet). The car's kernel therefore NEVER answers ARP
+ * requests, including those of the phone on the hotspot (ap0): the phone cannot resolve the hardware
+ * address of 192.168.x.1 and its TCP connection to port 30518 fails with `EHOSTUNREACH` (seen in the
+ * Pixel's logcat: CAR.SETUP.WIFI, "No route to host", IpReachabilityMonitor NUD_FAILED), without a single
+ * packet ever reaching our ServerSocket.
+ *
+ * Without root this sysctl cannot be changed. Workaround: a Linux host updates (or unblocks) an EXISTING
+ * neighbour entry (including INCOMPLETE/FAILED) when it receives a broadcast ARP request whose sender is
+ * that IP address -- even if the request is not about the receiving host. So the car's kernel is made to
+ * emit broadcast ARP requests (sender = hotspot address) by sending UDP datagrams to unused addresses of
+ * the subnet. The phone thereby learns the car's hardware address.
+ *
+ * Sends no useful content: one UDP byte to port 9 (discard), never to a real device.
+ */
+object ArpNudger {
+    private const val TAG = "ArpNudger"
+    private const val INTERVAL_MS = 150L
+
+    @Volatile
+    private var job: Job? = null
+
+    @Volatile
+    private var runningFor: String? = null
+
+    /** Starts (or extends) the ARP wake-up for the hotspot [hostIp] for [durationMs]. */
+    @Synchronized
+    fun start(scope: CoroutineScope, hostIp: String, durationMs: Long = 60_000L) {
+        if (job?.isActive == true && runningFor == hostIp) {
+            // already running for this hotspot: restart for a full duration
+            stop()
+        } else {
+            stop()
+        }
+        val host = try {
+            InetAddress.getByName(hostIp) as? Inet4Address
+        } catch (e: Exception) {
+            null
+        }
+        if (host == null) {
+            AppLog.w("$TAG: invalid hotspot address ($hostIp), no ARP wake-up.")
+            return
+        }
+        val raw = host.address
+        runningFor = hostIp
+        job = scope.launch(Dispatchers.IO) {
+            AppLog.i("$TAG: ARP wake-up active for ${host.hostAddress} (${durationMs / 1000}s) -- the car's kernel has arp_ignore=8.")
+            val deadline = System.currentTimeMillis() + durationMs
+            var sent = 0
+            var errors = 0
+            try {
+                // source = hotspot address, so the ARP sender IP is the one the phone is looking for
+                DatagramSocket(0, host).use { socket ->
+                    var i = 0
+                    while (isActive && System.currentTimeMillis() < deadline) {
+                        // addresses .200 to .249: never handed out by the DHCP (low range), never the car
+                        val lastOctet = 200 + (i % 50)
+                        i++
+                        val target = byteArrayOf(raw[0], raw[1], raw[2], lastOctet.toByte())
+                        try {
+                            socket.send(
+                                DatagramPacket(byteArrayOf(0), 1, InetAddress.getByAddress(target), 9)
+                            )
+                            sent++
+                        } catch (e: Exception) {
+                            if (errors++ < 3) AppLog.w("$TAG: cannot send UDP: ${e.javaClass.simpleName}: ${e.message}")
+                        }
+                        delay(INTERVAL_MS)
+                    }
+                }
+            } catch (e: Exception) {
+                AppLog.w("$TAG: stopped on error ${e.javaClass.simpleName}: ${e.message}")
+            }
+            AppLog.i("$TAG: ARP wake-up finished ($sent datagrams, $errors errors).")
+        }
+    }
+
+    @Synchronized
+    fun stop() {
+        job?.cancel()
+        job = null
+        runningFor = null
+    }
+}
