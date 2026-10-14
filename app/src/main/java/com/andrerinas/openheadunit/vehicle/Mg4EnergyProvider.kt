@@ -87,6 +87,10 @@ object Mg4EnergyProvider {
                         AppLog.i("$TAG CarPropertyManager ready — refreshing SoC/range")
                         refresh()
                     }
+                    EVHardware.whenSaicHubReady {
+                        AppLog.i("$TAG SaicHub ready — refreshing SoC/range")
+                        refresh()
+                    }
                     primeFirstReading()
                 } catch (error: Throwable) {
                     AppLog.e("$TAG EVHardware init failed; EV energy disabled: ${error.message}")

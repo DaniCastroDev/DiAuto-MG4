@@ -149,13 +149,32 @@ internal class AapControlMedia(
     }
 
     private fun micRequest(micRequest: Media.MicrophoneRequest): Int {
-        AppLog.d("Mic request: %s", micRequest)
+        AppLog.i("Mic request: open=${micRequest.open}")
 
-        if (micRequest.open) {
-            micRecorder.start()
+        val status = if (micRequest.open) {
+            val result = micRecorder.start()
+            AppLog.i("MicRecorder.start result=$result")
+            if (result == 0) {
+                Common.MessageStatus.STATUS_SUCCESS_VALUE
+            } else {
+                Common.MessageStatus.STATUS_INTERNAL_ERROR_VALUE
+            }
         } else {
             micRecorder.stop()
+            Common.MessageStatus.STATUS_SUCCESS_VALUE
         }
+
+        val response = Media.MicrophoneResponse.newBuilder()
+            .setStatus(status)
+            .setSessionId(0)
+            .build()
+        aapTransport.send(
+            AapMessage(
+                Channel.ID_MIC,
+                Media.MsgType.MEDIA_MESSAGE_MICROPHONE_RESPONSE_VALUE,
+                response,
+            ),
+        )
         return 0
     }
 

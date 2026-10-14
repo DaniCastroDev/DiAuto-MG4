@@ -40,12 +40,29 @@ class SaicService private constructor(
     @Volatile
     private var connecting = false
 
+    private val readyListeners = mutableListOf<() -> Unit>()
+
     val isReady: Boolean get() = binder?.isBinderAlive == true
 
     fun binder(): IBinder? = binder?.takeIf { it.isBinderAlive }.also {
         // A service that died leaves a stale handle behind; drop it so the next connect()
         // rebinds instead of transacting into nothing.
         if (it == null && binder != null) binder = null
+    }
+
+    /** Runs [action] now if bound, otherwise once when [onServiceConnected] fires. */
+    fun whenReady(action: () -> Unit) {
+        if (isReady) {
+            action()
+            return
+        }
+        synchronized(readyListeners) {
+            if (isReady) {
+                action()
+            } else {
+                readyListeners.add(action)
+            }
+        }
     }
 
     /** Idempotent: binds once, and again only after the service has died. */
@@ -64,11 +81,25 @@ class SaicService private constructor(
         }
     }
 
+    private fun notifyReady() {
+        val listeners = synchronized(readyListeners) {
+            val copy = readyListeners.toList()
+            readyListeners.clear()
+            copy
+        }
+        for (listener in listeners) {
+            runCatching { listener() }.onFailure {
+                AppLogger.w(TAG, "$tag: ready listener failed: ${it.message}")
+            }
+        }
+    }
+
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             connecting = false
             binder = service
             AppLogger.i(TAG, "$tag: connected")
+            notifyReady()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {

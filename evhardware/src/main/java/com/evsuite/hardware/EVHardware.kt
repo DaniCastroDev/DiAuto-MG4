@@ -606,6 +606,16 @@ object EVHardware {
     }
 
     /**
+     * Runs [action] when [SaicHub] is bound (SoC/range path). Connects if needed.
+     * Used so the first energy snapshot is not stuck until a manual refresh.
+     */
+    fun whenSaicHubReady(action: () -> Unit) {
+        val ctx = sAppContext ?: return
+        SaicHub.whenReady(action)
+        runCatching { SaicHub.connect(ctx) }
+    }
+
+    /**
      * Battery power from the pack's own voltage and current, in kW — SWI68 only.
      *
      * SWI68 publishes no `EV_BATTERY_INSTANTANEOUS_CHARGE_RATE`, which is why every kWh figure

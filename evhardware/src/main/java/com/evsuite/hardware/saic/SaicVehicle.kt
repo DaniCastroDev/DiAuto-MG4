@@ -30,6 +30,9 @@ object SaicHub {
 
     fun connect(context: Context) = service.connect(context)
 
+    /** Runs [action] when the vehicle hub binder is available (immediately if already bound). */
+    fun whenReady(action: () -> Unit) = service.whenReady(action)
+
     /** Sub-service binder, resolved once and re-resolved after the hub reconnects. */
     @Synchronized
     fun service(name: String): IBinder? {

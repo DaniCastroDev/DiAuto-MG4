@@ -169,12 +169,22 @@ internal class AapAudio(
     }
 
     fun requestFocusChange(stream: Int, focusRequest: Int, callback: AudioManager.OnAudioFocusChangeListener): Int {
-        AppLog.i("Audio Focus Request: stream=$stream, type=$focusRequest")
-        
+        // Notification/voice GAIN_TRANSIENT pauses A2DP (AVRCP) on this HU; duck instead.
+        val effectiveFocus =
+            if (focusRequest == Control.AudioFocusRequestNotification.AudioFocusRequestType.GAIN_TRANSIENT_VALUE &&
+                (stream == AudioManager.STREAM_NOTIFICATION || stream == AudioManager.STREAM_VOICE_CALL)
+            ) {
+                AppLog.i("Audio Focus Request: coercing GAIN_TRANSIENT → MAY_DUCK for stream=$stream")
+                Control.AudioFocusRequestNotification.AudioFocusRequestType.GAIN_TRANSIENT_MAY_DUCK_VALUE
+            } else {
+                focusRequest
+            }
+        AppLog.i("Audio Focus Request: stream=$stream, type=$effectiveFocus")
+
         var result = AudioManager.AUDIOFOCUS_REQUEST_FAILED
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { // API 26+
-            if (focusRequest == Control.AudioFocusRequestNotification.AudioFocusRequestType.RELEASE_VALUE) {
+            if (effectiveFocus == Control.AudioFocusRequestNotification.AudioFocusRequestType.RELEASE_VALUE) {
                 AppLog.i("Releasing audio focus")
                 audioFocusRequest?.let {
                     runCatching { mediaAudioManager.abandonAudioFocusRequest(it) }
@@ -201,18 +211,18 @@ internal class AapAudio(
 
                 val focusAm =
                     if (usage == AudioAttributes.USAGE_MEDIA) mediaAudioManager else audioManager
-                audioFocusRequest = AudioFocusRequest.Builder(focusRequest)
+                audioFocusRequest = AudioFocusRequest.Builder(effectiveFocus)
                         .setAudioAttributes(audioAttributes)
                         .setWillPauseWhenDucked(false)
                         .setOnAudioFocusChangeListener(callback)
                         .build()
-                
+
                 result = focusAm.requestAudioFocus(audioFocusRequest!!)
                 AppLog.i("Audio focus request result: ${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED ($result)"}")
             }
         } else { // API < 26
             @Suppress("DEPRECATION")
-            result = when (focusRequest) {
+            result = when (effectiveFocus) {
                 Control.AudioFocusRequestNotification.AudioFocusRequestType.RELEASE_VALUE -> {
                     audioManager.abandonAudioFocus(callback)
                     legacyFocusListener?.let { audioManager.abandonAudioFocus(it) }
@@ -238,38 +248,70 @@ internal class AapAudio(
         return result
     }
 
-    private fun requestPlaybackFocus() {
+    private fun requestPlaybackFocus(channel: Int) {
+        val speech = channel == Channel.ID_AU1 || channel == Channel.ID_AU2
+        // Speech/notification must MAY_DUCK so hybrid A2DP music is not AVRCP-paused.
+        val focusGain = if (speech) {
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+        } else {
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                    .setAudioAttributes(SaicCarAudioSource.mediaAttributes())
+            val attrs = if (speech) {
+                val usage = if (channel == Channel.ID_AU1) {
+                    AudioAttributes.USAGE_VOICE_COMMUNICATION
+                } else {
+                    AudioAttributes.USAGE_NOTIFICATION
+                }
+                AudioAttributes.Builder()
+                    .setUsage(usage)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            } else {
+                SaicCarAudioSource.mediaAttributes()
+            }
+            val focusAm = if (speech) audioManager else mediaAudioManager
+            val request = AudioFocusRequest.Builder(focusGain)
+                    .setAudioAttributes(attrs)
                     .setWillPauseWhenDucked(false)
                     .setOnAudioFocusChangeListener(playbackFocusListener)
                     .build()
             playbackFocusRequest = request
-            
-            val result = mediaAudioManager.requestAudioFocus(request)
-            AppLog.i("AapAudio: Playback transient focus request result: ${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED ($result)"}")
+
+            val result = focusAm.requestAudioFocus(request)
+            AppLog.i(
+                "AapAudio: Playback focus (${Channel.name(channel)}, " +
+                    "${if (speech) "MAY_DUCK" else "TRANSIENT"}) result: " +
+                    "${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED ($result)"}",
+            )
         } else {
             @Suppress("DEPRECATION")
             legacyPlaybackFocusListener = playbackFocusListener
+            val stream = AudioConfigs.stream(channel, separateAudioStreams)
             @Suppress("DEPRECATION")
-            val result = mediaAudioManager.requestAudioFocus(playbackFocusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-            AppLog.i("AapAudio: Playback transient focus request result (legacy): ${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED"}")
+            val result = audioManager.requestAudioFocus(playbackFocusListener, stream, focusGain)
+            AppLog.i(
+                "AapAudio: Playback focus legacy (${Channel.name(channel)}) result: " +
+                    "${if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) "GRANTED" else "FAILED"}",
+            )
         }
     }
 
     private fun releasePlaybackFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            playbackFocusRequest?.let { 
+            playbackFocusRequest?.let {
                 AppLog.i("AapAudio: Releasing playback transient audio focus")
-                mediaAudioManager.abandonAudioFocusRequest(it) 
+                // Speech may have been requested on process AM; media on SAIC AM.
+                runCatching { mediaAudioManager.abandonAudioFocusRequest(it) }
+                runCatching { audioManager.abandonAudioFocusRequest(it) }
             }
             playbackFocusRequest = null
         } else {
             @Suppress("DEPRECATION")
-            legacyPlaybackFocusListener?.let { 
+            legacyPlaybackFocusListener?.let {
                 AppLog.i("AapAudio: Releasing playback transient audio focus (legacy)")
-                mediaAudioManager.abandonAudioFocus(it) 
+                runCatching { mediaAudioManager.abandonAudioFocus(it) }
+                runCatching { audioManager.abandonAudioFocus(it) }
             }
             legacyPlaybackFocusListener = null
         }
@@ -314,7 +356,7 @@ internal class AapAudio(
         )
         focusAcquiredAtMs = SystemClock.elapsedRealtime()
         holdingPlaybackFocus = true
-        requestPlaybackFocus()
+        requestPlaybackFocus(channel)
     }
 
     fun releaseAllFocus() {
@@ -447,7 +489,7 @@ internal class AapAudio(
                 "(mode=$mode, bluetoothMedia=$btMediaLinkActive)")
         focusAcquiredAtMs = SystemClock.elapsedRealtime()
         holdingPlaybackFocus = true
-        requestPlaybackFocus()
+        requestPlaybackFocus(channel)
     }
 
     /**

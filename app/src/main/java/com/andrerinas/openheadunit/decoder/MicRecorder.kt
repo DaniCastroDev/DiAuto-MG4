@@ -19,6 +19,9 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import com.andrerinas.openheadunit.utils.AppLog
 import com.andrerinas.openheadunit.utils.Settings
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MicRecorder(private val micSampleRate: Int, private val context: Context) {
 
@@ -60,6 +63,7 @@ class MicRecorder(private val micSampleRate: Int, private val context: Context) 
     companion object {
         // Sentinel value stored in settings to indicate Bluetooth SCO mode
         const val SOURCE_BLUETOOTH_SCO = 100
+        private const val SCO_CONNECT_TIMEOUT_MS = 2_000L
     }
 
     interface Listener {
@@ -155,12 +159,16 @@ class MicRecorder(private val micSampleRate: Int, private val context: Context) 
         }
     }
 
+    /**
+     * @return 0 on success (AudioRecord initialized), -3 permission, -4 unavailable,
+     * -7 internal / init failure.
+     */
     fun start(): Int {
         if (!isAvailable) {
             AppLog.w("MicRecorder: Cannot start, mic not available on this device")
             return -4
         }
-        
+
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -168,21 +176,31 @@ class MicRecorder(private val micSampleRate: Int, private val context: Context) 
             return -3
         }
 
+        if (audioRecord?.state == AudioRecord.STATE_INITIALIZED && threadMicAudioActive) {
+            AppLog.i("MicRecorder: already recording")
+            return 0
+        }
+
         val configuredSource = getAudioSource(settings.micInputSource)
-        
-        if (configuredSource == SOURCE_BLUETOOTH_SCO) {
+        val ok = if (configuredSource == SOURCE_BLUETOOTH_SCO) {
             startScoAndRecord()
         } else {
             startRecording(configuredSource)
         }
-        
-        return 0
+
+        return if (ok && audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
+            AppLog.i("MicRecorder: start OK (source=${getAudioSourceName(configuredSource)})")
+            0
+        } else {
+            AppLog.e("MicRecorder: start failed — AudioRecord not initialized")
+            -7
+        }
     }
 
-    private fun startScoAndRecord() {
+    /** @return true when an AudioRecord was started successfully. */
+    private fun startScoAndRecord(): Boolean {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        
-        // Check for BLUETOOTH_CONNECT permission on Android 12+ (API 31+)
+
         val hasBluetoothPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
                 PackageManager.PERMISSION_GRANTED
@@ -190,84 +208,126 @@ class MicRecorder(private val micSampleRate: Int, private val context: Context) 
             true
         }
 
-        // Set audio mode to MODE_IN_COMMUNICATION to force SCO routing
-        try {
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        } catch (e: Exception) {
-            AppLog.e("MicRecorder: Failed to set audio mode to MODE_IN_COMMUNICATION", e)
-        }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hasBluetoothPermission) {
             AppLog.i("MicRecorder: API 31+. Using setCommunicationDevice for Bluetooth routing.")
             val devices = audioManager.availableCommunicationDevices
-            val bluetoothDevice = devices.find { 
-                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || 
-                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+            val bluetoothDevice = devices.find {
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
             }
             if (bluetoothDevice != null) {
                 val success = audioManager.setCommunicationDevice(bluetoothDevice)
-                AppLog.i("MicRecorder: setCommunicationDevice result: $success for device: ${bluetoothDevice.productName} (${bluetoothDevice.type})")
-            } else {
-                AppLog.w("MicRecorder: No Bluetooth SCO/BLE headset found in available communication devices.")
-            }
-            // On API 31+, we can start recording directly on the communication channel
-            startRecording(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
-            bluetoothScoStarted = true
-        } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission) {
-                AppLog.w("MicRecorder: Missing BLUETOOTH_CONNECT permission on API 31+. Falling back to legacy SCO.")
-            }
-            // Legacy path (API < 31 or missing BLUETOOTH_CONNECT permission on API 31+)
-            // 1. Listen for SCO connection state
-            scoReceiver = object : BroadcastReceiver() {
-                override fun onReceive(context: Context, intent: Intent) {
-                    val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
-                    if (AppLog.LOG_DEBUG) AppLog.d("MicRecorder: SCO State change: $state")
-                    
-                    if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
-                        AppLog.i("MicRecorder: SCO Connected. Starting AudioRecord.")
-                        // On many devices, even with SCO, we should use MIC or DEFAULT 
-                        // as VOICE_COMMUNICATION might try to use the device's own noise cancellation.
-                        startRecording(MediaRecorder.AudioSource.MIC)
-                    } else if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED && bluetoothScoStarted) {
-                        AppLog.w("MicRecorder: SCO Disconnected unexpectedly.")
-                        stop()
+                AppLog.i(
+                    "MicRecorder: setCommunicationDevice result: $success for device: " +
+                        "${bluetoothDevice.productName} (${bluetoothDevice.type})",
+                )
+                if (success) {
+                    try {
+                        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                    } catch (e: Exception) {
+                        AppLog.e("MicRecorder: Failed to set MODE_IN_COMMUNICATION", e)
                     }
+                    bluetoothScoStarted = true
+                    if (startRecording(MediaRecorder.AudioSource.VOICE_COMMUNICATION)) return true
+                    cleanupSco()
+                }
+            } else {
+                AppLog.w("MicRecorder: No Bluetooth SCO/BLE headset — falling back to local mic.")
+            }
+            return startRecording(MediaRecorder.AudioSource.VOICE_RECOGNITION) ||
+                startRecording(MediaRecorder.AudioSource.MIC)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission) {
+            AppLog.w("MicRecorder: Missing BLUETOOTH_CONNECT — falling back to local mic.")
+            return startRecording(MediaRecorder.AudioSource.VOICE_RECOGNITION) ||
+                startRecording(MediaRecorder.AudioSource.MIC)
+        }
+
+        // Legacy SCO: wait briefly for CONNECTED, then fall back to cabin mic.
+        val connected = AtomicBoolean(false)
+        val latch = CountDownLatch(1)
+        scoReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
+                if (AppLog.LOG_DEBUG) AppLog.d("MicRecorder: SCO State change: $state")
+                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                    connected.set(true)
+                    latch.countDown()
+                } else if (state == AudioManager.SCO_AUDIO_STATE_DISCONNECTED && bluetoothScoStarted) {
+                    AppLog.w("MicRecorder: SCO Disconnected unexpectedly.")
+                    stop()
                 }
             }
-            
-            ContextCompat.registerReceiver(context, scoReceiver, IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED), ContextCompat.RECEIVER_EXPORTED)
-            
-            // 2. Start SCO
-            AppLog.i("MicRecorder: Starting Bluetooth SCO...")
-            audioManager.startBluetoothSco()
-            @Suppress("DEPRECATION")
-            audioManager.isBluetoothScoOn = true
-            bluetoothScoStarted = true
         }
+
+        ContextCompat.registerReceiver(
+            context,
+            scoReceiver,
+            IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED),
+            ContextCompat.RECEIVER_EXPORTED,
+        )
+
+        AppLog.i("MicRecorder: Starting Bluetooth SCO...")
+        bluetoothScoStarted = true
+        audioManager.startBluetoothSco()
+        @Suppress("DEPRECATION")
+        audioManager.isBluetoothScoOn = true
+
+        val scoOk = try {
+            latch.await(SCO_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS) && connected.get()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
+
+        if (scoOk) {
+            AppLog.i("MicRecorder: SCO Connected. Starting AudioRecord.")
+            try {
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            } catch (e: Exception) {
+                AppLog.e("MicRecorder: Failed to set MODE_IN_COMMUNICATION", e)
+            }
+            if (startRecording(MediaRecorder.AudioSource.MIC)) return true
+            cleanupSco()
+        } else {
+            AppLog.w("MicRecorder: SCO did not connect in ${SCO_CONNECT_TIMEOUT_MS}ms — local mic fallback.")
+            cleanupSco()
+        }
+        return startRecording(MediaRecorder.AudioSource.VOICE_RECOGNITION) ||
+            startRecording(MediaRecorder.AudioSource.MIC)
     }
 
     @SuppressLint("MissingPermission") // RECORD_AUDIO checked immediately above / in start()
-    private fun startRecording(source: Int) {
+    private fun startRecording(source: Int): Boolean {
         try {
-            if (audioRecord != null) return // Already recording
-            // SCO callbacks may arrive later; re-check before constructing AudioRecord.
+            if (audioRecord != null) return audioRecord?.state == AudioRecord.STATE_INITIALIZED
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED
             ) {
                 AppLog.e("MicRecorder: No RECORD_AUDIO permission when starting AudioRecord")
-                return
+                return false
             }
 
-            AppLog.i("MicRecorder: Initializing AudioRecord with source: ${getAudioSourceName(source)} ($source), SampleRate: $micSampleRate, BufferSize: $micBufferSize")
-            audioRecord = AudioRecord(source, micSampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, micBufferSize)
-            
+            AppLog.i(
+                "MicRecorder: Initializing AudioRecord with source: ${getAudioSourceName(source)} ($source), " +
+                    "SampleRate: $micSampleRate, BufferSize: $micBufferSize",
+            )
+            audioRecord = AudioRecord(
+                source,
+                micSampleRate,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                micBufferSize,
+            )
+
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                 AppLog.e("MicRecorder: Failed to initialize AudioRecord")
+                audioRecord?.release()
                 audioRecord = null
-                return
+                return false
             }
-            
+
             val audioSessionId = audioRecord?.audioSessionId ?: 0
             if (audioSessionId != 0) {
                 try {
@@ -278,7 +338,7 @@ class MicRecorder(private val micSampleRate: Int, private val context: Context) 
                     } else if (settings.micNoiseSuppressor) {
                         AppLog.i("MicRecorder: NoiseSuppressor: Unsupported on this device")
                     }
-                    
+
                     if (settings.micAutoGainControl && AutomaticGainControl.isAvailable()) {
                         agc = AutomaticGainControl.create(audioSessionId)
                         agc?.enabled = true
@@ -286,7 +346,7 @@ class MicRecorder(private val micSampleRate: Int, private val context: Context) 
                     } else if (settings.micAutoGainControl) {
                         AppLog.i("MicRecorder: AutomaticGainControl: Unsupported on this device")
                     }
-                    
+
                     if (settings.micEchoCanceler && AcousticEchoCanceler.isAvailable()) {
                         aec = AcousticEchoCanceler.create(audioSessionId)
                         aec?.enabled = true
@@ -298,19 +358,22 @@ class MicRecorder(private val micSampleRate: Int, private val context: Context) 
                     AppLog.e("MicRecorder: Error initializing AudioFX", e)
                 }
             }
-            
+
             audioRecord?.startRecording()
-            
+
             threadMicAudioActive = true
             threadMicAudio = Thread({
                 while (threadMicAudioActive) {
                     micAudioRead(micAudioBuf, micBufferSize)
                 }
             }, "mic_audio").apply { start() }
-            
+
+            return true
         } catch (e: Exception) {
             AppLog.e("MicRecorder: Error during startRecording", e)
+            audioRecord?.release()
             audioRecord = null
+            return false
         }
     }
 

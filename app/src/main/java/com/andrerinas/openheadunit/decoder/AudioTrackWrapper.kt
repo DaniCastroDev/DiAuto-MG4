@@ -458,13 +458,12 @@ class AudioTrackWrapper(
                 .setUsage(usage)
                 .setContentType(contentType)
                 .setLegacyStreamType(stream)
-            // MEDIA stream: tag as Android Auto (70) so eh32 amp routes Wi‑Fi PCM.
-            if (usage == AudioAttributes.USAGE_MEDIA) {
-                SaicCarAudioSource.attachSourceType(
-                    attrBuilder,
-                    SaicCarAudioSource.SRC_ANDROID_AUTO,
-                )
-            }
+            // Tag every AA sink (media, Gemini/AU1, nav/notification/AU2) as Android Auto
+            // (70) so the SAIC amp routes hybrid speech PCM as well as Wi‑Fi media.
+            SaicCarAudioSource.attachSourceType(
+                attrBuilder,
+                SaicCarAudioSource.SRC_ANDROID_AUTO,
+            )
             val audioAttributes = attrBuilder.build()
 
             val audioFormat = AudioFormat.Builder()
