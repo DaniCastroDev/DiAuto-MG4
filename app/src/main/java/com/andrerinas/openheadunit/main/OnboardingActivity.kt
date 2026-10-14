@@ -23,6 +23,7 @@ import com.andrerinas.openheadunit.utils.LocaleHelper
 import com.andrerinas.openheadunit.utils.PermissionRowBinder
 import com.andrerinas.openheadunit.utils.Settings
 import com.andrerinas.openheadunit.utils.SystemOptimizer
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import com.google.android.material.button.MaterialButton
@@ -89,6 +90,13 @@ class OnboardingActivity : BaseActivity() {
 
         setContentView(R.layout.activity_onboarding)
 
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                // Back walks the steps; from the first step it behaves like "Do it later".
+                if (step > 0) goBack() else onDoItLater()
+            }
+        })
+
         step = savedInstanceState?.getInt(KEY_STEP, 0) ?: 0
 
         flipper = findViewById(R.id.onb_flipper)
@@ -101,7 +109,7 @@ class OnboardingActivity : BaseActivity() {
         selectedSize = estimateSizePreset()
 
         if (settings.connectionModes.isEmpty()) {
-            settings.connectionModes = setOf(Settings.ConnectionMode.WIFI, Settings.ConnectionMode.USB)
+            settings.connectionModes = setOf(Settings.ConnectionMode.USB, Settings.ConnectionMode.WIFI)
         }
         buildStepperDots()
         bindSteps()
@@ -493,11 +501,6 @@ class OnboardingActivity : BaseActivity() {
         deferredThisSession = true
         settings.commit()
         finish()
-    }
-
-    override fun onBackPressed() {
-        // Back walks the steps; from the first step it behaves like "Do it later".
-        if (step > 0) goBack() else onDoItLater()
     }
 
     private fun finishOnboarding() {

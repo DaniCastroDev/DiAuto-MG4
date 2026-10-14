@@ -620,29 +620,44 @@ class Settings(private val context: Context) {
     // How the user primarily connects. Drives which options are surfaced in the Basic tab
     // (e.g. cable users do not see the Wireless Connection group there). UNSET shows everything.
     var primaryConnection: ConnectionKind
-        get() = ConnectionKind.fromInt(prefs.getInt("primary-connection", ConnectionKind.NATIVE_AA.value))
+        get() = ConnectionKind.fromInt(prefs.getInt("primary-connection", ConnectionKind.ALL.value))
         set(value) { prefs.edit().putInt("primary-connection", value.value).apply() }
 
     /**
      * The connection types the user actually uses (multi-select). Drives which settings are shown.
      * Empty = nothing chosen yet, so everything is shown. Migrated once from the legacy
      * single-choice [primaryConnection].
+     *
+     * v2 defaults to USB+WiFi (was WiFi-only via the old NATIVE_AA silent default).
      */
     var connectionModes: Set<ConnectionMode>
         get() {
-            val stored = prefs.getStringSet("connection-modes", null)
-            if (stored != null) return stored.mapNotNull { ConnectionMode.fromKey(it) }.toSet()
-            val migrated = migrateLegacyConnectionModes()
-            connectionModes = migrated
-            return migrated
+            prefs.getStringSet(KEY_CONNECTION_MODES, null)?.let { stored ->
+                return stored.mapNotNull { ConnectionMode.fromKey(it) }.toSet()
+            }
+            val legacy = prefs.getStringSet("connection-modes", null)
+                ?.mapNotNull { ConnectionMode.fromKey(it) }
+                ?.toSet()
+            // Old auto-default was WiFi-only (NATIVE_AA migrate); expand that to USB+WiFi.
+            // Keep Self / other multi-select choices the user actually made.
+            val result = when {
+                legacy == null -> setOf(ConnectionMode.USB, ConnectionMode.WIFI)
+                legacy == setOf(ConnectionMode.WIFI) || legacy == setOf(ConnectionMode.USB) ->
+                    setOf(ConnectionMode.USB, ConnectionMode.WIFI)
+                else -> legacy
+            }
+            connectionModes = result
+            return result
         }
         set(value) {
-            prefs.edit().putStringSet("connection-modes", value.map { it.key }.toSet()).apply()
+            prefs.edit().putStringSet(KEY_CONNECTION_MODES, value.map { it.key }.toSet()).apply()
         }
 
     private fun migrateLegacyConnectionModes(): Set<ConnectionMode> = when (primaryConnection) {
         ConnectionKind.USB_CABLE, ConnectionKind.USB_WIRELESS_ADAPTER -> setOf(ConnectionMode.USB)
-        ConnectionKind.WIFI, ConnectionKind.NATIVE_AA -> setOf(ConnectionMode.WIFI)
+        ConnectionKind.WIFI -> setOf(ConnectionMode.WIFI)
+        // Former silent default; DiAuto-MG4 ships USB+WiFi in Advanced → Connection mode.
+        ConnectionKind.NATIVE_AA -> setOf(ConnectionMode.USB, ConnectionMode.WIFI)
         ConnectionKind.SELF_MODE -> setOf(ConnectionMode.SELF)
         ConnectionKind.ALL -> setOf(ConnectionMode.USB, ConnectionMode.WIFI)
         ConnectionKind.UNSET -> emptySet()
@@ -1148,6 +1163,8 @@ class Settings(private val context: Context) {
         const val KEY_LOG_LOCATION = "log-location"
         // Was music-via-bluetooth / v2 (ON) / v3 (OFF). v4 resets upgrades to ON (hybrid default).
         const val KEY_MUSIC_VIA_BLUETOOTH = "music-via-bluetooth-v4"
+        // Was connection-modes (WiFi-only via NATIVE_AA default). v2 defaults to USB+WiFi.
+        const val KEY_CONNECTION_MODES = "connection-modes-v2"
         // Was stretch_to_fill (default ON). v2 resets upgrades to OFF.
         const val KEY_STRETCH_TO_FILL = "stretch-to-fill-v2"
         // Was auto-enable-hotspot (default OFF). v2 resets upgrades to ON.
