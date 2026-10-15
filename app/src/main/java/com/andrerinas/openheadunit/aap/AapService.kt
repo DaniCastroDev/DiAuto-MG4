@@ -2243,6 +2243,12 @@ class AapService : Service(), UsbReceiver.Listener {
                     commManager.connectionState.value is CommManager.ConnectionState.Connecting
                 if (sessionUp) {
                     AppLog.d("AapService: Bluetooth auto-start ignored — session already up.")
+                } else if (settings.wifiConnectionMode == 1) {
+                    // Headunit Server mode was chosen on purpose (on the MG4 SWI68 the Bluetooth
+                    // stack refuses the Native AA RFCOMM channel, and the phone's head unit server
+                    // over Wi-Fi is the path that works). Keep the mode; make sure the scan runs.
+                    AppLog.i("AapService: Bluetooth auto-start — keeping Headunit Server mode, scanning for the phone")
+                    startDiscovery(oneShot = false)
                 } else {
                     // Trusted Bluetooth phone just linked — go straight to Native AA; do not wait
                     // for the user to pick the phone on the home screen.

@@ -141,6 +141,14 @@ class HomeFragment : Fragment() {
     }
 
     private fun startNativeAa(device: BluetoothDevice) {
+        if (app.settings.wifiConnectionMode == 1) {
+            // Headunit Server mode: "Connect phone" looks for Android Auto's head unit server on
+            // the network instead of switching back to Native AA.
+            ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java).apply {
+                action = AapService.ACTION_START_WIRELESS_SCAN
+            })
+            return
+        }
         app.settings.wifiConnectionMode = 3
         // Remember this phone so the next Bluetooth ACL_CONNECTED auto-starts without a tap.
         val macs = app.settings.autoStartBluetoothDeviceMacs
