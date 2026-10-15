@@ -2248,7 +2248,7 @@ class AapService : Service(), UsbReceiver.Listener {
                     // stack refuses the Native AA RFCOMM channel, and the phone's head unit server
                     // over Wi-Fi is the path that works). Keep the mode; make sure the scan runs.
                     AppLog.i("AapService: Bluetooth auto-start — keeping Headunit Server mode, scanning for the phone")
-                    startDiscovery(oneShot = false)
+                    scheduleHeadunitServerScan(reason = "bt auto-start")
                 } else {
                     // Trusted Bluetooth phone just linked — go straight to Native AA; do not wait
                     // for the user to pick the phone on the home screen.
@@ -3884,6 +3884,21 @@ class AapService : Service(), UsbReceiver.Listener {
         nativeAaPokeJob = serviceScope.launch {
             awaitUserExitCooldown(reason)
             armNativeAaForPoke()
+        }
+    }
+
+    /**
+     * Headunit Server counterpart of [scheduleNativeAaArm]: waits out a user exit like the Native
+     * AA path, then makes sure the mode is set up before scanning. startDiscovery() alone returns
+     * without a word when the wireless server is gone (after ACTION_STOP_WIRELESS, for one);
+     * initWifiMode() rebuilds it and is a no-op when the mode is already running.
+     */
+    private fun scheduleHeadunitServerScan(reason: String) {
+        nativeAaPokeJob?.cancel()
+        nativeAaPokeJob = serviceScope.launch {
+            awaitUserExitCooldown(reason)
+            initWifiMode()
+            startDiscovery(oneShot = false)
         }
     }
 
