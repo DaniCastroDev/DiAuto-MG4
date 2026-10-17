@@ -89,6 +89,10 @@ class HomeFragment : Fragment() {
      * are connected at once and none is the remembered auto-start device.
      */
     private fun connectWireless() {
+        if (app.settings.wifiConnectionMode == 1) {
+            connectHeadunitServer()
+            return
+        }
         val adapter = BluetoothHelper.getBluetoothAdapter(requireContext())
         try {
             if (adapter == null || !adapter.isEnabled) {
@@ -140,17 +144,24 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun startNativeAa(device: BluetoothDevice) {
-        if (app.settings.wifiConnectionMode == 1) {
-            // Headunit Server mode: "Connect phone" looks for Android Auto's head unit server on
-            // the network instead of switching back to Native AA.
-            ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java).apply {
-                action = AapService.ACTION_START_WIRELESS_SCAN
-            })
-            return
+    /**
+     * Headunit Server mode reaches the phone over Wi-Fi only, so Bluetooth is not required here.
+     * A phone that is linked anyway is remembered, so its next Bluetooth connection starts the
+     * scan by itself (AutoStartReceiver only acts on remembered phones).
+     */
+    private fun connectHeadunitServer() {
+        try {
+            val connected = BluetoothHelper.connectedBondedDevices(requireContext())
+            if (connected.size == 1) rememberAutoStartDevice(connected[0])
+        } catch (_: SecurityException) {
+            // Remembering the phone is a convenience; the scan below does not need it.
         }
-        app.settings.wifiConnectionMode = 3
-        // Remember this phone so the next Bluetooth ACL_CONNECTED auto-starts without a tap.
+        ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java).apply {
+            action = AapService.ACTION_START_WIRELESS_SCAN
+        })
+    }
+
+    private fun rememberAutoStartDevice(device: BluetoothDevice) {
         val macs = app.settings.autoStartBluetoothDeviceMacs
         if (!macs.contains(device.address)) {
             val updated = macs + device.address
@@ -158,6 +169,12 @@ class HomeFragment : Fragment() {
             app.settings.autoStartBluetoothDeviceName = device.name ?: "Unknown Device"
             Settings.syncAutoStartBtMacsToDeviceStorage(requireContext(), updated)
         }
+    }
+
+    private fun startNativeAa(device: BluetoothDevice) {
+        app.settings.wifiConnectionMode = 3
+        // Remember this phone so the next Bluetooth ACL_CONNECTED auto-starts without a tap.
+        rememberAutoStartDevice(device)
         (activity as? MainActivity)?.beginAutoConnect(
             "native wireless ${device.address}", MainActivity.ConnectionUiMode.PILL)
         ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java).apply {

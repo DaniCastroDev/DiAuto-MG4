@@ -1940,6 +1940,7 @@ class AapService : Service(), UsbReceiver.Listener {
 
             // Mode 1: Headunit Server Mode
             if (mode == 1) {
+                ensureHeadunitServerHotspot()
                 // Auto discovery for standard server mode via NSD/mDNS
                 startDiscovery(oneShot = false)
             }
@@ -3920,9 +3921,36 @@ class AapService : Service(), UsbReceiver.Listener {
         nativeAaPokeJob?.cancel()
         nativeAaPokeJob = serviceScope.launch {
             awaitUserExitCooldown(reason)
+            // The wait above can last 15 s; a session may have come up in the meantime, and
+            // starting the access point under it would drop the link it rides on.
+            if (commManager.isBusy) {
+                AppLog.i("AapService: $reason — a connection came up while waiting; leaving it alone")
+                return@launch
+            }
             initWifiMode()
+            // initWifiMode() returns early when the mode is already set up, so the hotspot it would
+            // have started is checked here too: the car may have dropped it since.
+            ensureHeadunitServerHotspot()
             startDiscovery(oneShot = false)
         }
+    }
+
+    /**
+     * Headunit Server mode finds the phone on this unit's own hotspot, and nothing else turns that
+     * hotspot on in this mode (Native AA and Helper strategy 4 bring it up for themselves). Start it
+     * when auto-enable is on; HotspotManager leaves an access point that is already up alone.
+     * Users who put the head unit on the phone's hotspot instead can turn auto-enable off, since
+     * starting an access point drops this unit's Wi-Fi client connection.
+     */
+    private fun ensureHeadunitServerHotspot() {
+        if (!App.provide(this).settings.autoEnableHotspot) return
+        // Same rule as initWifiMode(): while the boot-loop guard has wireless paused, bringing the
+        // access point up would invite the phone straight back into the crash it guards against.
+        if (Settings.isWirelessPausedByBootLoop(this)) return
+        Thread {
+            AppLog.i("AapService: Auto-enabling hotspot for Headunit Server mode...")
+            HotspotManager.setHotspotEnabled(this, true)
+        }.start()
     }
 
     private suspend fun awaitUserExitCooldown(reason: String) {
