@@ -969,7 +969,11 @@ class CommManager(
 
     fun destroy() {
         doDisconnect()
-        _scope.cancel()
+        // This instance is the app-wide one from AppComponent and outlives the service that calls
+        // destroy(): a later AapService in the same process uses it again. Cancelling the scope
+        // itself made every later launch a no-op, so disconnects never ran their cleanup. Cancel
+        // only the work in flight.
+        _scope.coroutineContext.cancelChildren()
     }
 
     companion object {
