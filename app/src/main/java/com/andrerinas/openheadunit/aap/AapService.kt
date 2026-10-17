@@ -245,6 +245,10 @@ class AapService : Service(), UsbReceiver.Listener {
      */
     private var isDestroying = false
     private var hasEverConnected = false
+    // Set by every Connected, cleared by the Disconnected that follows. onConnected() runs on each
+    // TCP connect (it pauses the radio, takes the WifiLock, starts GPS…), so its teardown has to
+    // run for a connection that failed before TransportStarted too, not only after a session.
+    private var connectedSinceLastDisconnect = false
     private var accessoryHandshakeFailures = 0
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -889,7 +893,10 @@ class AapService : Service(), UsbReceiver.Listener {
         serviceScope.launch {
             commManager.connectionState.collect { state ->
                 when (state) {
-                    is CommManager.ConnectionState.Connected -> onConnected()
+                    is CommManager.ConnectionState.Connected -> {
+                        connectedSinceLastDisconnect = true
+                        onConnected()
+                    }
                     is CommManager.ConnectionState.HandshakeComplete -> {
                         automaticReconnectAttempts = 0
                         launchAapProjectionActivity()
@@ -916,7 +923,10 @@ class AapService : Service(), UsbReceiver.Listener {
                         }
                     }
                     is CommManager.ConnectionState.Disconnected -> {
-                        if (hasEverConnected) onDisconnected(state)
+                        if (hasEverConnected || connectedSinceLastDisconnect) {
+                            connectedSinceLastDisconnect = false
+                            onDisconnected(state)
+                        }
                     }
                     else -> {}
                 }
