@@ -201,6 +201,18 @@
         </activity>
 
         <activity
+            android:name=".main.NavTestActivity"
+            android:label="DiAuto Nav Test"
+            android:exported="true"
+            android:windowSoftInputMode="stateHidden|adjustResize"
+            android:theme="@style/AppTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".main.SettingsActivity"
             android:label="@string/settings"
             android:windowSoftInputMode="stateHidden|adjustResize"

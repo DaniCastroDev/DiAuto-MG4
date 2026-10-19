@@ -84,19 +84,30 @@ internal data class SaicGuidance(
 /** Android Auto guidance snapshot to [SaicGuidance]. Reads the snapshot the same way [BydNavigationMapper] does. */
 internal object SaicNavigationMapper {
 
-    fun from(snapshot: NavigationSnapshot): SaicGuidance? {
+    fun from(snapshot: NavigationSnapshot, rightHandDrive: Boolean = false): SaicGuidance? {
         val status = snapshot.clusterStatus?.payload?.status
         if (status != null && status != NavigationStatus.NavigationClusterStatus.NavigationStatusEnum.ACTIVE) return null
         val step = snapshot.navigationState?.payload?.stepsList?.firstOrNull()
         if (snapshot.navigationState != null && step == null) return null
         val legacy = snapshot.nextTurnDetail?.payload
         val modern = step?.takeIf { it.hasManeuver() && it.maneuver.hasType() }?.maneuver
-        val type: NavigationType = modern?.type ?: legacy?.takeIf { it.hasNextTurn() }?.let {
-            legacyType(it.nextTurn, if (it.hasSide()) it.side else Side.UNSPECIFIED)
+        // Google Maps sends only the older event, and for a roundabout it carries the exit number and angle.
+        val legacyRoundabout = modern == null && legacy?.takeIf { it.hasNextTurn() }?.nextTurn == NextEvent.ROUNDABOUT_ENTER_AND_EXIT
+        val type: NavigationType = modern?.type ?: legacy?.let {
+            val side = if (it.hasSide()) it.side else Side.UNSPECIFIED
+            when {
+                legacyRoundabout -> legacyRoundaboutType(side, rightHandDrive)
+                it.hasNextTurn() -> legacyType(it.nextTurn, side)
+                // The arrival: Maps sends no maneuver, only the side the destination lies on.
+                else -> destinationType(side)
+            }
         } ?: return null
+        // The exit fields of the older event keep their last value on other events, so they count for a roundabout only.
         val exitNumber = modern?.takeIf { it.hasRoundaboutExitNumber() }?.roundaboutExitNumber
+            ?: legacy?.takeIf { legacyRoundabout && it.hasTurnNumber() }?.turnNumber
         val exitAngle = modern?.takeIf { it.hasRoundaboutExitAngle() }?.roundaboutExitAngle
-        val icon = icon(type, exitNumber, exitAngle) ?: return null
+            ?: legacy?.takeIf { legacyRoundabout && it.hasTurnAngle() }?.turnAngle
+        val icon = icon(type, exitNumber, exitAngle, rightHandDrive) ?: return null
         val position = snapshot.currentPosition?.payload
         val distance = distanceMeters(snapshot) ?: return null // An unknown distance must not be shown as "now".
         if (distance < 0) return null
@@ -126,6 +137,28 @@ internal object SaicNavigationMapper {
                 position.payload.stepDistance.distance.meters
             else -> legacy?.payload?.distanceMeters
         }
+    }
+
+    /** The destination icon for the side it lies on; null when the side is not known. */
+    private fun destinationType(side: Side): NavigationType? = when (side) {
+        Side.LEFT -> NavigationType.DESTINATION_LEFT
+        Side.RIGHT -> NavigationType.DESTINATION_RIGHT
+        else -> null
+    }
+
+    /**
+     * The roundabout of the older turn event: its side is the side of the traffic, so a roundabout is
+     * driven counter-clockwise with the traffic on the right and clockwise with it on the left. With no
+     * side, the steering side of the car stands in for it (steering on the right, traffic on the left).
+     */
+    fun legacyRoundaboutType(side: Side, rightHandDrive: Boolean): NavigationType {
+        val clockwise = when (side) {
+            Side.LEFT -> true
+            Side.RIGHT -> false
+            else -> rightHandDrive
+        }
+        return if (clockwise) NavigationType.ROUNDABOUT_ENTER_AND_EXIT_CW_WITH_ANGLE
+        else NavigationType.ROUNDABOUT_ENTER_AND_EXIT_CCW_WITH_ANGLE
     }
 
     /**
@@ -158,7 +191,7 @@ internal object SaicNavigationMapper {
             NextEvent.STRAIGHT -> NavigationType.STRAIGHT
             NextEvent.FERRY_BOAT -> NavigationType.FERRY_BOAT
             NextEvent.FERRY_TRAIN -> NavigationType.FERRY_TRAIN
-            NextEvent.DESTINATION -> NavigationType.DESTINATION
+            NextEvent.DESTINATION -> destinationType(side) ?: NavigationType.DESTINATION
             else -> null
         }
     }
@@ -173,13 +206,21 @@ internal object SaicNavigationMapper {
      * (a merge or a roundabout with no side or exit), so the cluster shows nothing rather than a
      * misleading arrow.
      *
-     * Note the table pairs the "bear" icons (ids 3 and 4) with keeps and forks, and the "slide" icons
-     * (ids 17 and 18) with slight turns, the other way round from the names of [ClusterIdTelenav].
+     * Note the table pairs the "bear" icons (ids 3 and 4) with forks and the roundabout exit, and the
+     * "slide" icons (ids 17 and 18) with keeps and slight turns, the other way round from the names of
+     * [ClusterIdTelenav]. [rightHandDrive] is the steering side of the car: the roundabout exit takes
+     * the side of the traffic, the left in a right-hand-drive car.
      */
-    fun icon(type: NavigationType, exitNumber: Int? = null, exitAngle: Int? = null): ClusterIdTelenav? = when (type) {
+    fun icon(
+        type: NavigationType,
+        exitNumber: Int? = null,
+        exitAngle: Int? = null,
+        rightHandDrive: Boolean = false,
+    ): ClusterIdTelenav? = when (type) {
         NavigationType.UNKNOWN,
         NavigationType.DEPART,
         NavigationType.NAME_CHANGE,
+        NavigationType.MERGE_SIDE_UNSPECIFIED,
         NavigationType.STRAIGHT -> ClusterIdTelenav.CONTINUE
 
         NavigationType.TURN_NORMAL_LEFT,
@@ -187,9 +228,11 @@ internal object SaicNavigationMapper {
         NavigationType.TURN_NORMAL_RIGHT,
         NavigationType.ON_RAMP_NORMAL_RIGHT -> ClusterIdTelenav.TURN_RIGHT
 
+        NavigationType.KEEP_LEFT,
         NavigationType.TURN_SLIGHT_LEFT,
         NavigationType.ON_RAMP_SLIGHT_LEFT,
         NavigationType.OFF_RAMP_SLIGHT_LEFT -> ClusterIdTelenav.STAY_LEFT
+        NavigationType.KEEP_RIGHT,
         NavigationType.TURN_SLIGHT_RIGHT,
         NavigationType.ON_RAMP_SLIGHT_RIGHT,
         NavigationType.OFF_RAMP_SLIGHT_RIGHT -> ClusterIdTelenav.STAY_RIGHT
@@ -204,9 +247,7 @@ internal object SaicNavigationMapper {
         NavigationType.U_TURN_RIGHT,
         NavigationType.ON_RAMP_U_TURN_RIGHT -> ClusterIdTelenav.RIGHT_U_TURN
 
-        NavigationType.KEEP_LEFT,
         NavigationType.FORK_LEFT -> ClusterIdTelenav.TURN_SLIGHT_LEFT
-        NavigationType.KEEP_RIGHT,
         NavigationType.FORK_RIGHT -> ClusterIdTelenav.TURN_SLIGHT_RIGHT
 
         NavigationType.OFF_RAMP_NORMAL_LEFT,
@@ -214,10 +255,11 @@ internal object SaicNavigationMapper {
         NavigationType.OFF_RAMP_NORMAL_RIGHT,
         NavigationType.MERGE_RIGHT -> ClusterIdTelenav.EXIT_RIGHT
 
-        // No side, or no exit named: the table has no icon.
-        NavigationType.MERGE_SIDE_UNSPECIFIED,
-        NavigationType.ROUNDABOUT_ENTER,
-        NavigationType.ROUNDABOUT_EXIT -> null
+        // No exit named: the table has no icon.
+        NavigationType.ROUNDABOUT_ENTER -> null
+        // Leaving a roundabout: a slight turn to the side the exit lies on (right in right-hand traffic).
+        NavigationType.ROUNDABOUT_EXIT ->
+            if (rightHandDrive) ClusterIdTelenav.TURN_SLIGHT_LEFT else ClusterIdTelenav.TURN_SLIGHT_RIGHT
         NavigationType.ROUNDABOUT_ENTER_AND_EXIT_CW,
         NavigationType.ROUNDABOUT_ENTER_AND_EXIT_CW_WITH_ANGLE ->
             roundaboutIcon(Circulation.CLOCKWISE, exitNumber, exitAngle)
@@ -267,16 +309,18 @@ internal object SaicNavigationMapper {
      * is not known. With neither, the straight-through icon.
      */
     fun roundaboutIcon(circulation: Circulation, exitNumber: Int?, exitAngle: Int?): ClusterIdTelenav {
-        val angle = exitAngle?.takeIf { it in 1..360 }
-            ?: exitNumber?.takeIf { it >= 1 }?.let { minOf(it, 3) * 90 }
-            ?: return ClusterIdTelenav.ROUND_ABOUT_3
-        val heading = Math.floorMod(
-            if (circulation == Circulation.COUNTER_CLOCKWISE) 180 - angle else 180 + angle,
-            360
-        )
+        val heading = roundaboutHeading(circulation, exitNumber, exitAngle) ?: return ClusterIdTelenav.ROUND_ABOUT_3
         return roundaboutIcons.minByOrNull { (position, _) ->
             val gap = Math.abs(heading - position)
             minOf(gap, 360 - gap)
         }!!.second
+    }
+
+    /** Heading of the exit in degrees clockwise from the entry heading (0 = straight on), null with no angle or number. */
+    fun roundaboutHeading(circulation: Circulation, exitNumber: Int?, exitAngle: Int?): Int? {
+        val angle = exitAngle?.takeIf { it in 1..360 }
+            ?: exitNumber?.takeIf { it >= 1 }?.let { minOf(it, 3) * 90 }
+            ?: return null
+        return Math.floorMod(if (circulation == Circulation.COUNTER_CLOCKWISE) 180 - angle else 180 + angle, 360)
     }
 }

@@ -3,6 +3,10 @@ package com.andrerinas.openheadunit.hud
 import com.andrerinas.openheadunit.aap.protocol.proto.NavigationStatus.NavigationManeuver.NavigationType
 import com.andrerinas.openheadunit.aap.protocol.proto.NavigationStatus.NextTurnDetail.NextEvent
 import com.andrerinas.openheadunit.aap.protocol.proto.NavigationStatus.NextTurnDetail.Side
+import com.andrerinas.openheadunit.aap.AapNavigationHelper.NavigationSnapshot
+import com.andrerinas.openheadunit.aap.AapNavigationHelper.TimedMessage
+import com.andrerinas.openheadunit.aap.protocol.proto.NavigationStatus.NextTurnDetail
+import com.andrerinas.openheadunit.aap.protocol.proto.NavigationStatus.NextTurnDistanceEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -49,11 +53,21 @@ class SaicNavigationOutputsTest {
     }
 
     @Test
-    fun keepsAndForksUseTheBearIconsIds3And4() {
-        assertEquals(3, SaicNavigationMapper.icon(NavigationType.KEEP_LEFT)?.id)
+    fun forksUseTheBearIconsIds3And4() {
         assertEquals(3, SaicNavigationMapper.icon(NavigationType.FORK_LEFT)?.id)
-        assertEquals(4, SaicNavigationMapper.icon(NavigationType.KEEP_RIGHT)?.id)
         assertEquals(4, SaicNavigationMapper.icon(NavigationType.FORK_RIGHT)?.id)
+    }
+
+    @Test
+    fun keepsUseTheSlideIconsIds17And18() {
+        assertEquals(17, SaicNavigationMapper.icon(NavigationType.KEEP_LEFT)?.id)
+        assertEquals(18, SaicNavigationMapper.icon(NavigationType.KEEP_RIGHT)?.id)
+    }
+
+    @Test
+    fun aRoundaboutExitIsASlightTurnToTheSideOfTheTraffic() {
+        assertEquals(4, SaicNavigationMapper.icon(NavigationType.ROUNDABOUT_EXIT, rightHandDrive = false)?.id)
+        assertEquals(3, SaicNavigationMapper.icon(NavigationType.ROUNDABOUT_EXIT, rightHandDrive = true)?.id)
     }
 
     @Test
@@ -135,10 +149,13 @@ class SaicNavigationOutputsTest {
     }
 
     @Test
-    fun aRoundaboutOrMergeWithNothingToDrawHasNoIcon() {
+    fun aRoundaboutEntryWithNoExitHasNoIcon() {
         assertNull(SaicNavigationMapper.icon(NavigationType.ROUNDABOUT_ENTER))
-        assertNull(SaicNavigationMapper.icon(NavigationType.ROUNDABOUT_EXIT))
-        assertNull(SaicNavigationMapper.icon(NavigationType.MERGE_SIDE_UNSPECIFIED))
+    }
+
+    @Test
+    fun aMergeWithNoSideContinuesStraight() {
+        assertEquals(0, SaicNavigationMapper.icon(NavigationType.MERGE_SIDE_UNSPECIFIED)?.id)
     }
 
     @Test
@@ -191,11 +208,7 @@ class SaicNavigationOutputsTest {
 
     @Test
     fun onlyTheManeuversWithNothingToDrawHaveNoIcon() {
-        val withoutIcon = setOf(
-            NavigationType.MERGE_SIDE_UNSPECIFIED,
-            NavigationType.ROUNDABOUT_ENTER,
-            NavigationType.ROUNDABOUT_EXIT,
-        )
+        val withoutIcon = setOf(NavigationType.ROUNDABOUT_ENTER)
         for (type in NavigationType.values()) {
             if (type in withoutIcon) assertNull("$type", SaicNavigationMapper.icon(type))
             else assertNotNull("no icon for $type", SaicNavigationMapper.icon(type))
@@ -269,5 +282,48 @@ class SaicNavigationOutputsTest {
     fun anUnitTheAdapterDoesNotKnowIsTreatedAsMetric() {
         assertEquals(300, SaicDistance.forCluster(300, 0))
         assertEquals(300, SaicDistance.forCluster(300, 3))
+    }
+
+    /** What Google Maps sends: only the older events, as logged on the car. */
+    private fun legacyFrame(event: NextEvent?, side: Side, number: Int, angle: Int, rightHandDrive: Boolean = false): SaicGuidance? {
+        val detail = NextTurnDetail.newBuilder().setRoad("D400").setSide(side)
+            .setTurnNumber(number).setTurnAngle(angle).apply { if (event != null) setNextTurn(event) }.build()
+        val distance = NextTurnDistanceEvent.newBuilder().setDistanceMeters(200).build()
+        @Suppress("DEPRECATION")
+        val snapshot = NavigationSnapshot(nextTurnDetail = TimedMessage(detail, 1), nextTurnDistance = TimedMessage(distance, 1))
+        return SaicNavigationMapper.from(snapshot, rightHandDrive)
+    }
+
+    @Test
+    fun aRoundaboutOfTheOlderEventShowsItsExit() {
+        // (exit number, angle) pairs seen on the car, in right-hand traffic.
+        assertEquals(ClusterIdTelenav.ROUND_ABOUT_1, legacyFrame(NextEvent.ROUNDABOUT_ENTER_AND_EXIT, Side.RIGHT, 2, 90)?.icon)
+        assertEquals(ClusterIdTelenav.ROUND_ABOUT_3, legacyFrame(NextEvent.ROUNDABOUT_ENTER_AND_EXIT, Side.RIGHT, 2, 180)?.icon)
+        assertEquals(ClusterIdTelenav.ROUND_ABOUT_5, legacyFrame(NextEvent.ROUNDABOUT_ENTER_AND_EXIT, Side.RIGHT, 3, 270)?.icon)
+        assertEquals(ClusterIdTelenav.ROUND_ABOUT_2, legacyFrame(NextEvent.ROUNDABOUT_ENTER_AND_EXIT, Side.RIGHT, 1, 135)?.icon)
+        assertEquals(ClusterIdTelenav.ROUND_ABOUT_4, legacyFrame(NextEvent.ROUNDABOUT_ENTER_AND_EXIT, Side.RIGHT, 1, 225)?.icon)
+    }
+
+    @Test
+    fun aLeftTrafficRoundaboutOfTheOlderEventGoesTheOtherWay() {
+        assertEquals(ClusterIdTelenav.ROUND_ABOUT_5, legacyFrame(NextEvent.ROUNDABOUT_ENTER_AND_EXIT, Side.LEFT, 2, 90)?.icon)
+        assertEquals(ClusterIdTelenav.ROUND_ABOUT_5, legacyFrame(NextEvent.ROUNDABOUT_ENTER_AND_EXIT, Side.UNSPECIFIED, 2, 90, rightHandDrive = true)?.icon)
+    }
+
+    @Test
+    fun theExitFieldsOfOtherOlderEventsAreIgnored() {
+        // The phone leaves the last roundabout's number and angle on a merge.
+        assertEquals(ClusterIdTelenav.CONTINUE, legacyFrame(NextEvent.MERGE, Side.UNSPECIFIED, 4, 270)?.icon)
+        assertEquals(ClusterIdTelenav.TURN_SLIGHT_RIGHT, legacyFrame(NextEvent.ROUNDABOUT_EXIT, Side.RIGHT, 0, 0)?.icon)
+    }
+
+    @Test
+    fun theArrivalShowsTheDestinationOnItsSide() {
+        // Maps sends the arrival with no maneuver, only the side.
+        assertEquals(ClusterIdTelenav.LOCATION_RIGHT, legacyFrame(null, Side.RIGHT, 0, 0)?.icon)
+        assertEquals(ClusterIdTelenav.LOCATION_LEFT, legacyFrame(null, Side.LEFT, 0, 0)?.icon)
+        assertNull(legacyFrame(null, Side.UNSPECIFIED, 0, 0))
+        assertEquals(ClusterIdTelenav.LOCATION_RIGHT, legacyFrame(NextEvent.DESTINATION, Side.RIGHT, 0, 0)?.icon)
+        assertEquals(ClusterIdTelenav.LOCATION_AHEAD, legacyFrame(NextEvent.DESTINATION, Side.UNSPECIFIED, 0, 0)?.icon)
     }
 }
