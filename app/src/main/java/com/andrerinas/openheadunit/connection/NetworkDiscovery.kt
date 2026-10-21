@@ -180,6 +180,7 @@ class NetworkDiscovery(private val context: Context, private val listener: Liste
                 val activeNet = cm.activeNetwork
                 if (activeNet != null) {
                     val lp = cm.getLinkProperties(activeNet)
+                        ?.takeIf { DiscoveryInterfaces.isScannable(it.interfaceName.orEmpty()) }
                     lp?.routes?.forEach { route ->
                         if (route.isDefaultRoute && route.gateway is Inet4Address) {
                             route.gateway?.hostAddress?.let { suspects.add(it) }
@@ -250,7 +251,10 @@ class NetworkDiscovery(private val context: Context, private val listener: Liste
 
     private data class LocalSubnet(val iface: String, val prefix: String, val ip: String)
 
-    /** IPv4 /24 prefixes of every up interface, access-point interfaces first. */
+    /**
+     * IPv4 /24 prefixes of every up interface that can lead to the phone, access-point interfaces
+     * first (see [DiscoveryInterfaces]).
+     */
     private fun localSubnets(): List<LocalSubnet> = try {
         Collections.list(NetworkInterface.getNetworkInterfaces())
             .filter { it.isUp && !it.isLoopback }
@@ -261,15 +265,12 @@ class NetworkDiscovery(private val context: Context, private val listener: Liste
                     if (lastDot <= 0) null else LocalSubnet(nif.name, host.substring(0, lastDot), host)
                 }
             }
+            .let { subnets -> DiscoveryInterfaces.prioritize(subnets) { it.iface } }
             .distinctBy { it.prefix }
-            .sortedBy { if (isAccessPointInterface(it.iface)) 0 else 1 }
     } catch (e: Exception) {
         AppLog.e("NetworkDiscovery: Failed to list local subnets", e)
         emptyList()
     }
-
-    private fun isAccessPointInterface(name: String): Boolean =
-        name.startsWith("ap") || name.startsWith("swlan") || name.startsWith("softap")
 
     private suspend fun checkAndReport(ip: String): Boolean {
         if (reportedIps.contains(ip)) return true
@@ -367,6 +368,8 @@ class NetworkDiscovery(private val context: Context, private val listener: Liste
             while (interfaces.hasMoreElements()) {
                 val iface = interfaces.nextElement()
                 if (iface.isLoopback || !iface.isUp) continue
+                // Same rule as the subnet sweep: the telematics gateway is not the phone.
+                if (!DiscoveryInterfaces.isScannable(iface.name)) continue
 
                 val addresses = iface.inetAddresses
                 while (addresses.hasMoreElements()) {
