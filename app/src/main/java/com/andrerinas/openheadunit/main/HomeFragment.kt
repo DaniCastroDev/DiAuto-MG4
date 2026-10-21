@@ -26,6 +26,7 @@ import com.andrerinas.openheadunit.utils.BluetoothHelper
 import com.andrerinas.openheadunit.utils.Settings
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /** The car's standby screen. Wireless pairing is the primary path; USB remains a fallback. */
@@ -61,21 +62,57 @@ class HomeFragment : Fragment() {
         view.findViewById<View>(R.id.exit_button).setOnClickListener { requireActivity().moveTaskToBack(true) }
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                app.commManager.connectionState.collect { state ->
-                    val status = when (state) {
-                        is CommManager.ConnectionState.Disconnected -> R.string.da_ready
-                        is CommManager.ConnectionState.TransportStarted -> R.string.da_connected
-                        else -> R.string.da_connecting
-                    }
-                    view.findViewById<TextView>(R.id.connection_status).setText(status)
-                    view.findViewById<MaterialButton>(R.id.wifi_button).setText(
-                        if (app.commManager.isConnected) R.string.da_open else R.string.da_connect)
+                combine(app.commManager.connectionState, AapService.scanningState) { state, scanning ->
+                    linkOf(state) to scanning
+                }.collect { (link, scanning) ->
+                    if (link != HomeStatusPolicy.Link.DISCONNECTED) sweepsWithoutPhone = 0
+                    else if (HomeStatusPolicy.isMissedSweep(lastScanning, scanning, link)) sweepsWithoutPhone++
+                    lastLink = link
+                    lastScanning = scanning
+                    render(view)
                 }
             }
         }
         if (app.settings.autoStartOnBoot || app.settings.autoStartOnScreenOn) {
             ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java))
         }
+    }
+
+    // The search as the home screen last saw it (see HomeStatusPolicy).
+    private var lastLink = HomeStatusPolicy.Link.DISCONNECTED
+    private var lastScanning = false
+    private var sweepsWithoutPhone = 0
+
+    override fun onResume() {
+        super.onResume()
+        // The connection mode may have changed in Settings.
+        view?.let { render(it) }
+    }
+
+    private fun linkOf(state: CommManager.ConnectionState) = when (state) {
+        is CommManager.ConnectionState.Disconnected, is CommManager.ConnectionState.Error -> HomeStatusPolicy.Link.DISCONNECTED
+        is CommManager.ConnectionState.TransportStarted -> HomeStatusPolicy.Link.CONNECTED
+        else -> HomeStatusPolicy.Link.CONNECTING
+    }
+
+    private fun render(view: View) {
+        val headunitServer = app.settings.wifiConnectionMode == 1
+        val status = HomeStatusPolicy.status(headunitServer, lastLink, lastScanning, sweepsWithoutPhone)
+        view.findViewById<TextView>(R.id.connection_status).setText(when (status) {
+            HomeStatusPolicy.Status.READY -> if (headunitServer) R.string.da_ready_headunit_server else R.string.da_ready
+            HomeStatusPolicy.Status.SEARCHING -> R.string.da_searching
+            HomeStatusPolicy.Status.NOT_FOUND_YET -> R.string.da_not_found_yet
+            HomeStatusPolicy.Status.CONNECTING -> R.string.da_connecting
+            HomeStatusPolicy.Status.CONNECTED -> R.string.da_connected
+        })
+        view.findViewById<MaterialButton>(R.id.wifi_button).setText(when {
+            app.commManager.isConnected -> R.string.da_open
+            headunitServer -> R.string.da_find_phone
+            else -> R.string.da_connect
+        })
+        view.findViewById<TextView>(R.id.connection_hint)?.setText(
+            if (headunitServer) R.string.da_hint_headunit_server else R.string.da_hint
+        )
     }
 
     private fun openProjection() {
@@ -156,6 +193,9 @@ class HomeFragment : Fragment() {
         } catch (_: SecurityException) {
             // Remembering the phone is a convenience; the scan below does not need it.
         }
+        // A fresh search: say "searching" again until this one has had a full sweep.
+        sweepsWithoutPhone = 0
+        view?.let { render(it) }
         ContextCompat.startForegroundService(requireContext(), Intent(requireContext(), AapService::class.java).apply {
             action = AapService.ACTION_START_WIRELESS_SCAN
         })
