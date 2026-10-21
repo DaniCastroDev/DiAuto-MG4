@@ -155,11 +155,12 @@ object HeadUnitScreenConfig {
         // so we start with 0 system insets and just add manual settings.
         // Seed MG4 OEM top chrome (~80px) early for hide-left-only so the first AA handshake
         // already uses ~1920×1000 (avoids a mid-session glitch when insets arrive late).
-        systemInsetLeft = settings.insetLeft
+        val (insetLeft, insetRight) = settings.effectiveHorizontalInsets()
+        systemInsetLeft = insetLeft
         systemInsetTop = settings.insetTop + OemDisplayChrome.topBarReservePx(
             settings.fullscreenMode == Settings.FullscreenMode.NAV_ONLY
         )
-        systemInsetRight = settings.insetRight
+        systemInsetRight = insetRight
         systemInsetBottom = settings.insetBottom
         
         // Check if we have cached surface dimensions from a previous session.
@@ -524,9 +525,11 @@ object HeadUnitScreenConfig {
         hash = 31 * hash + settings.resolutionId
         hash = 31 * hash + settings.dpiPixelDensity
         hash = 31 * hash + settings.pixelAspectRatioE4
-        hash = 31 * hash + settings.insetLeft
+        // The insets in effect, so moving the MG4Dash strip to the other side drops the cached size.
+        val (insetLeft, insetRight) = settings.effectiveHorizontalInsets()
+        hash = 31 * hash + insetLeft
         hash = 31 * hash + settings.insetTop
-        hash = 31 * hash + settings.insetRight
+        hash = 31 * hash + insetRight
         hash = 31 * hash + settings.insetBottom
         hash = 31 * hash + settings.viewMode.ordinal
         hash = 31 * hash + settings.screenOrientation.ordinal

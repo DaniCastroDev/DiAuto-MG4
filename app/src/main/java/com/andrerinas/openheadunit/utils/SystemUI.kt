@@ -126,10 +126,9 @@ object SystemUI {
 
         val settings = Settings(root.context)
 
-        // IMMEDIATE APPLICATION OF MANUAL INSETS
-        val manualL = settings.insetLeft
+        // IMMEDIATE APPLICATION OF MANUAL INSETS (left/right follow the MG4Dash strip when it is on)
+        val (manualL, manualR) = settings.effectiveHorizontalInsets()
         val manualT = settings.insetTop
-        val manualR = settings.insetRight
         val manualB = settings.insetBottom
 
         // Same MG4 top-strip reserve the insets listener applies below; without it this first report

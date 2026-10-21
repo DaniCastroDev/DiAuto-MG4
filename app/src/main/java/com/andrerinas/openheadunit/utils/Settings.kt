@@ -279,6 +279,13 @@ class Settings(private val context: Context) {
         get() = prefs.getInt("inset-bottom", 0) // DiLink fullscreen is handled by BydFullscreen (no letterbox inset)
         set(value) { prefs.edit().putInt("inset-bottom", value).apply() }
 
+    /**
+     * Left and right insets in effect: [insetLeft]/[insetRight], unless the MG4Dash cockpit strip
+     * covers one side of the projection, in which case that side gets the strip's width.
+     */
+    fun effectiveHorizontalInsets(): Pair<Int, Int> =
+        CockpitStrip.horizontalInsets(insetLeft, insetRight, CockpitStrip.read(context))
+
     // Cached Surface Dimensions (used to avoid mismatch flicker on next start)
     var cachedSurfaceWidth: Int
         get() = prefs.getInt("cached-surface-width", 0)
