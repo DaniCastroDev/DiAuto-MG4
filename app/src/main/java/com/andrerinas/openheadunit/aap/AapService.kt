@@ -904,6 +904,9 @@ class AapService : Service(), UsbReceiver.Listener {
                     }
                     is CommManager.ConnectionState.TransportStarted -> {
                         hasEverConnected = true
+                        // A new session: an earlier user exit no longer says anything about this one,
+                        // and left set it would stop the discovery loop after an unexpected drop.
+                        userExitedAA = false
                         accessoryHandshakeFailures = 0
                         automaticReconnectAttempts = 0
                         sendBroadcast(Intent(ACTION_REQUEST_NIGHT_MODE_UPDATE).apply {
@@ -924,10 +927,12 @@ class AapService : Service(), UsbReceiver.Listener {
                         }
                     }
                     is CommManager.ConnectionState.Disconnected -> {
-                        if (hasEverConnected || connectedSinceLastDisconnect) {
-                            connectedSinceLastDisconnect = false
-                            onDisconnected(state)
-                        }
+                        val handling = DiscoveryRestartPolicy.onDisconnected(
+                            hadSession = hasEverConnected,
+                            connectedSinceLastDisconnect = connectedSinceLastDisconnect
+                        )
+                        connectedSinceLastDisconnect = false
+                        if (handling.teardown) onDisconnected(state, scheduleReconnect = handling.scheduleReconnect)
                     }
                     else -> {}
                 }
@@ -1389,8 +1394,12 @@ class AapService : Service(), UsbReceiver.Listener {
      * 2. Releasing the [MediaSessionCompat]
      * 3. Stopping audio/video decoders on the IO thread
      * 4. Scheduling a reconnect attempt if applicable (see [scheduleReconnectIfNeeded])
+     *
+     * [scheduleReconnect] is false for a connection that never became a session: the teardown
+     * still has to run, but retrying is left to the discovery loop and its backoff
+     * (see [DiscoveryRestartPolicy.onDisconnected]).
      */
-    private fun onDisconnected(state: CommManager.ConnectionState.Disconnected) {
+    private fun onDisconnected(state: CommManager.ConnectionState.Disconnected, scheduleReconnect: Boolean = true) {
         com.andrerinas.openheadunit.hud.SaicNavigationOutputs.stop()
         isSwitchingToAccessory.set(false)
         releaseWifiLock()
@@ -1536,7 +1545,11 @@ class AapService : Service(), UsbReceiver.Listener {
             AppLog.i("AapService: User exit cooldown active for ${USER_EXIT_COOLDOWN_MS}ms")
         }
 
-        scheduleReconnectIfNeeded(state)
+        if (scheduleReconnect) {
+            scheduleReconnectIfNeeded(state)
+        } else {
+            AppLog.i("AapService: The connection never became a session; leaving the retry to the discovery loop")
+        }
     }
 
     /**
@@ -3164,14 +3177,28 @@ class AapService : Service(), UsbReceiver.Listener {
                 discoveryRearmJob = serviceScope.launch {
                     delay(delayMs)
                     // A connection that is being set up may still fail its handshake before it
-                    // becomes a session, and then nothing else restarts the loop. Wait it out.
-                    while (wirelessServer != null && commManager.isBusy) {
-                        delay(DISCOVERY_BUSY_RECHECK_MS)
-                    }
-                    if (wirelessServer == null) {
-                        AppLog.i("AapService: Discovery loop ends — the wireless server is gone")
-                    } else {
-                        startDiscovery()
+                    // becomes a session, and then nothing else restarts the loop. Wait it out —
+                    // unless it ends in a user exit, which the loop has to respect as well.
+                    while (true) {
+                        when (DiscoveryRestartPolicy.rearm(
+                            serverUp = wirelessServer != null,
+                            connectionBusy = commManager.isBusy,
+                            userExited = userExitedAA
+                        )) {
+                            DiscoveryRestartPolicy.Rearm.WAIT -> delay(DISCOVERY_BUSY_RECHECK_MS)
+                            DiscoveryRestartPolicy.Rearm.STOP_SERVER_GONE -> {
+                                AppLog.i("AapService: Discovery loop ends — the wireless server is gone")
+                                return@launch
+                            }
+                            DiscoveryRestartPolicy.Rearm.STOP_USER_EXIT -> {
+                                AppLog.i("AapService: Discovery loop ends — the user left Android Auto; Connect or the phone's next Bluetooth link restarts it")
+                                return@launch
+                            }
+                            DiscoveryRestartPolicy.Rearm.SCAN -> {
+                                startDiscovery()
+                                return@launch
+                            }
+                        }
                     }
                 }
             }
@@ -3930,6 +3957,9 @@ class AapService : Service(), UsbReceiver.Listener {
                 AppLog.i("AapService: $reason — a connection came up while waiting; leaving it alone")
                 return@launch
             }
+            // The phone has just come back over Bluetooth, which a user exit in the car does not
+            // cause (its link stays up), so this is a new arrival: let the scan loop run again.
+            userExitedAA = false
             initWifiMode()
             // initWifiMode() returns early when the mode is already set up, so the hotspot it would
             // have started is checked here too: the car may have dropped it since.
