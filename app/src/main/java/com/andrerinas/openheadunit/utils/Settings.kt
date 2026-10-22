@@ -325,9 +325,16 @@ class Settings(private val context: Context) {
                 prefs.edit().putInt("fullscreen-mode", migrated.value).apply()
                 return migrated
             }
-            // Default: hide the left (nav) bar only — keeps the top status strip on MG4.
-            val value = prefs.getInt("fullscreen-mode", FullscreenMode.NAV_ONLY.value)
-            return FullscreenMode.fromInt(value) ?: FullscreenMode.NAV_ONLY
+            // Once: installs still on the old "hide left bar only" default move to immersive.
+            if (!prefs.getBoolean(KEY_IMMERSIVE_DEFAULT_APPLIED, false)) {
+                val stored = if (prefs.contains("fullscreen-mode")) prefs.getInt("fullscreen-mode", 0) else null
+                prefs.edit().apply {
+                    ScreenModeDefault.migrate(stored)?.let { putInt("fullscreen-mode", it) }
+                    putBoolean(KEY_IMMERSIVE_DEFAULT_APPLIED, true)
+                }.apply()
+            }
+            val value = prefs.getInt("fullscreen-mode", ScreenModeDefault.DEFAULT.value)
+            return FullscreenMode.fromInt(value) ?: ScreenModeDefault.DEFAULT
         }
         set(value) { prefs.edit().putInt("fullscreen-mode", value.value).apply() }
 
@@ -1232,6 +1239,7 @@ class Settings(private val context: Context) {
             }
         }
 
+        private const val KEY_IMMERSIVE_DEFAULT_APPLIED = "fullscreen-immersive-default-applied"
         private const val KEY_BOOT_LOOP_STRIKES = "boot-loop-strikes"
         private const val KEY_WIRELESS_PAUSED_BY_BOOT_LOOP = "wireless-paused-by-boot-loop"
 

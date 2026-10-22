@@ -35,8 +35,17 @@ object BootLoopPolicy {
     /** The strike count after another boot-started run begins. */
     fun nextStrikes(current: Int): Int = if (current < 0) 1 else current + 1
 
-    /** Whether to skip wireless bring-up on this run. */
-    fun shouldPauseWireless(strikes: Int): Boolean = strikes >= STRIKES_BEFORE_PAUSE
+    /**
+     * Whether to skip wireless bring-up on this run.
+     *
+     * Never on a SAIC head unit ([saicHeadUnit]). The MG4 boots every time the car wakes and is
+     * often switched off again within seconds (open the car, take something, lock it), so three
+     * short runs in a row are an ordinary day there, not a crash; and the pause is sticky, so
+     * DiAuto stopped connecting on its own until opened by hand (owner's report, 2026-10-22).
+     * No system crash on connect has been seen on the MG4.
+     */
+    fun shouldPauseWireless(strikes: Int, saicHeadUnit: Boolean = false): Boolean =
+        !saicHeadUnit && strikes >= STRIKES_BEFORE_PAUSE
 
     /**
      * Whether a run that lasted [runMs] counts as healthy, clearing the strikes.

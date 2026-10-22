@@ -85,4 +85,12 @@ class BootLoopPolicyTest {
         assertEquals(1, BootLoopPolicy.nextStrikes(-4))
         assertEquals(1, BootLoopPolicy.nextStrikes(0))
     }
+
+    @Test
+    fun `a SAIC head unit never pauses wireless, however many short runs`() {
+        // MG4: the car wakes and sleeps again within seconds several times a day.
+        assertFalse(BootLoopPolicy.shouldPauseWireless(BootLoopPolicy.STRIKES_BEFORE_PAUSE, saicHeadUnit = true))
+        assertFalse(BootLoopPolicy.shouldPauseWireless(50, saicHeadUnit = true))
+        assertTrue(BootLoopPolicy.shouldPauseWireless(BootLoopPolicy.STRIKES_BEFORE_PAUSE, saicHeadUnit = false))
+    }
 }

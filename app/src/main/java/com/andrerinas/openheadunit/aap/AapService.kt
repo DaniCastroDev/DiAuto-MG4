@@ -847,6 +847,16 @@ class AapService : Service(), UsbReceiver.Listener {
         }
         wifiDirectManager?.setNativeSessionConnectedProvider { commManager.isConnected }
         wifiDirectManager?.setNativeGroupInvalidatedListener { nativeAaHandshakeManager?.invalidateCredentials() }
+        // WifiDirectManager opens its P2P channel and receiver as soon as it is created, but only modes
+        // 2 and 3 use them (WifiModePolicy). initWifiMode stops it for the other modes, yet that never
+        // ran while the boot-loop guard paused wireless: in Headunit Server mode, with the hotspot up,
+        // the MT2712 then switched P2P off and on about 60 times a second (owner's log, 2026-10-22).
+        App.provide(this).settings.let { s ->
+            if (!WifiModePolicy.usesWifiDirect(s.wifiConnectionMode, s.helperConnectionStrategy, nativeTransport())) {
+                AppLog.i("AapService: WiFi mode ${s.wifiConnectionMode} does not use WiFi Direct - closing its P2P channel at start")
+                wifiDirectManager?.stop()
+            }
+        }
         softApCredentialsProvider?.setCredentialsListener { ssid, psk, ip, bssid ->
             onNativeCredentials(ssid, psk, ip, bssid)
         }
@@ -3408,13 +3418,21 @@ class AapService : Service(), UsbReceiver.Listener {
      * written, so it needs nothing from the start intent and can run here in onCreate.
      */
     private fun applyBootLoopGuard(): Boolean {
+        val saic = com.andrerinas.openheadunit.connection.CarNetworkQuirks.isSaicDevice()
+        if (saic && (Settings.isWirelessPausedByBootLoop(this) || Settings.getBootLoopStrikes(this) > 0)) {
+            // See BootLoopPolicy.shouldPauseWireless: short runs are normal on the MG4. Lift a pause
+            // left by an earlier version, which would otherwise hold until the app is opened by hand.
+            AppLog.i("AapService: SAIC head unit - boot-loop guard off; clearing strikes=${Settings.getBootLoopStrikes(this)} paused=${Settings.isWirelessPausedByBootLoop(this)}")
+            Settings.setBootLoopStrikes(this, 0)
+            Settings.setWirelessPausedByBootLoop(this, false)
+        }
         if (Settings.isWirelessPausedByBootLoop(this)) {
             AppLog.w("AapService: Wireless is still paused from an earlier boot loop. Open the app to re-enable it.")
             notifyBootLoopPause()
             return true
         }
         val strikes = Settings.getBootLoopStrikes(this)
-        if (!BootLoopPolicy.shouldPauseWireless(strikes)) return false
+        if (!BootLoopPolicy.shouldPauseWireless(strikes, saic)) return false
 
         AppLog.w(
             "AapService: $strikes boot-started runs in a row ended before " +

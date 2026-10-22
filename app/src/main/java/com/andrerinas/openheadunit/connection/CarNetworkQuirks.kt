@@ -66,7 +66,8 @@ object CarNetworkQuirks {
     @Volatile private var cachedWhy: String = ""
     @Volatile private var cachedArpNudge: Boolean? = null
 
-    private fun isSaicDevice(): Boolean =
+    /** MG4 / SAIC head unit (AllGo EH32 on MT2712). */
+    fun isSaicDevice(): Boolean =
         Build.MODEL.equals("SAIC", ignoreCase = true) ||
             Build.DEVICE.contains("saic", ignoreCase = true) ||
             Build.MANUFACTURER.equals("AUTUS", ignoreCase = true)
