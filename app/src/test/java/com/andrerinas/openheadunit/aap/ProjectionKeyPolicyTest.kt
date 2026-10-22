@@ -70,4 +70,21 @@ class ProjectionKeyPolicyTest {
             )
         )
     }
+
+    @Test
+    fun `volume keys stay with the car so Android Auto shows no focus highlight`() {
+        listOf(KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE)
+            .forEach { assertFalse(ProjectionKeyPolicy.shouldForwardCarKey(emptyMap(), it)) }
+    }
+
+    @Test
+    fun `a key learned in the keymap still reaches Android Auto`() {
+        val keymap = mapOf(KeyEvent.KEYCODE_MEDIA_NEXT to KeyEvent.KEYCODE_VOLUME_UP)
+        assertTrue(ProjectionKeyPolicy.shouldForwardCarKey(keymap, KeyEvent.KEYCODE_VOLUME_UP))
+    }
+
+    @Test
+    fun `the assistant key is not a navigation key`() {
+        assertTrue(ProjectionKeyPolicy.shouldForwardCarKey(emptyMap(), KeyEvent.KEYCODE_SEARCH))
+    }
 }

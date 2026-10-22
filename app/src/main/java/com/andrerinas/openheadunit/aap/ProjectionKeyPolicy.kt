@@ -17,7 +17,17 @@ object ProjectionKeyPolicy {
         KeyEvent.KEYCODE_NUMPAD_ENTER, KeyEvent.KEYCODE_TAB
     )
 
-    /** Whether a key the car delivered to the projection screen should go on to Android Auto. */
+    // Volume belongs to the car (SystemUI's volume handler); sent to Android Auto as well, any key it
+    // receives also switches it to rotary focus mode and the highlight appears on every press.
+    private val VOLUME_KEYS = setOf(
+        KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE
+    )
+
+    /**
+     * Whether a key from the car should go on to Android Auto. Navigation and volume keys only when
+     * the user learned them in the keymap. Applied where every key path meets (CommManager.sendKey),
+     * not only on the projection screen: broadcasts from the car reach Android Auto without it.
+     */
     fun shouldForwardCarKey(actionToPhysicalKeyCode: Map<Int, Int>, keyCode: Int): Boolean =
-        keyCode !in NAVIGATION_KEYS || actionToPhysicalKeyCode.containsValue(keyCode)
+        (keyCode !in NAVIGATION_KEYS && keyCode !in VOLUME_KEYS) || actionToPhysicalKeyCode.containsValue(keyCode)
 }

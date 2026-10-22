@@ -595,6 +595,13 @@ class CommManager(
             return
         }
 
+        // 0. Navigation and volume keys stay with the car unless learned in the keymap: any of them
+        // puts Android Auto into rotary focus mode, with its highlight over the projection.
+        if (!com.andrerinas.openheadunit.aap.ProjectionKeyPolicy.shouldForwardCarKey(settings.keyCodes, keyCode)) {
+            if (isPress) AppLog.i("CommManager: not forwarding car key $keyCode ($source) to Android Auto")
+            return
+        }
+
         // 1. Remapping (Physical -> Logical)
         // Check if the physical keyCode is mapped to a logical action in settings.
         // If not mapped, we use the original keyCode as the logical code.
